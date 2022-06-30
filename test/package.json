@@ -1,0 +1,6 @@
+{
+  "devDependencies": {
+    "@typechain/hardhat": "^6.1.2",
+    "hardhat": "^2.9.9"
+  }
+}

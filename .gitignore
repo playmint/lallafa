@@ -1,0 +1,4 @@
+node_modules
+test/artifacts
+test/cache
+test/typechain-types

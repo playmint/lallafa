@@ -1,0 +1,16 @@
+{
+    "compilerOptions": {
+        "outDir": "./lib",
+        "rootDir": "./src",
+        "declaration": true,
+        "declarationMap": true,
+        "esModuleInterop": true,
+        "target": "es2018",
+        "module": "commonjs",
+        "noFallthroughCasesInSwitch": true,
+        "noImplicitAny": true,
+        "noUnusedLocals": true,
+        "sourceMap": true,
+        "strict": true
+    }
+}
