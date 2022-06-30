@@ -7,4 +7,14 @@ contract Storage {
     function setValue(uint256 value) public {
         _value = value;
     }
+
+    function test(uint256 i) public {
+        uint256 value = i;
+        while (i > 2) {
+            --i;
+            value *= i;
+        }
+
+        setValue(value);
+    }
 }
