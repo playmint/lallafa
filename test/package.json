@@ -1,6 +1,8 @@
 {
   "devDependencies": {
+    "@nomiclabs/hardhat-ethers": "^2.0.6",
     "@typechain/hardhat": "^6.1.2",
+    "@types/mocha": "^9.1.1",
     "hardhat": "^2.9.9"
   }
 }
