@@ -71,16 +71,18 @@ export function profile(trace: DebugTrace, compilerOutput: CompilerOutput, input
         instructionToSourceLine.push(findSourceLine(sourceMap[i].sourceId, sourceMap[i].rangeStart));
     }
 
-    const gasPerPC: { [pc: number]: number } = {};
+    const gasPerInstruction: { [instructionId: number]: number } = {};
     const gasPerSource: { [source: number]: { [line: number]: number } } = {};
     for (const log of trace.structLogs) {
-        if (!gasPerPC[log.pc]) {
-            gasPerPC[log.pc] = 0;
-        }
-        gasPerPC[log.pc] += log.gasCost;
-
         // TODO throw if we can't map pc back to instruction, or an entry in source map, etc
         const instructionId = pcToInstruction[log.pc];
+
+        if (!gasPerInstruction[instructionId]) {
+            gasPerInstruction[instructionId] = 0;
+        }
+        gasPerInstruction[instructionId] += log.gasCost;
+
+
         const sourceMapEntry = sourceMap[instructionId];
 
         if (!gasPerSource[sourceMapEntry.sourceId]) {
