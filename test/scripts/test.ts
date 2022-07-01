@@ -19,7 +19,12 @@ async function main() {
         fs.writeFileSync("debug_trace.txt", JSON.stringify(debugTrace, null, 4));
     }
 
-    profile(JSON.parse(fs.readFileSync("debug_trace.txt").toString()));
+    const buildInfo = await hre.artifacts.getBuildInfo("contracts/Storage.sol:Storage");
+    if (!buildInfo) {
+        throw new Error("couldn't find build info");
+    }
+
+    profile(JSON.parse(fs.readFileSync("debug_trace.txt").toString()), buildInfo.output, buildInfo.input.sources);
 }
 
 main().catch(e => console.error(e));
