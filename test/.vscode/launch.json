@@ -8,26 +8,11 @@
             "type": "pwa-node",
             "request": "launch",
             "name": "Run Test (hardhat)",
-            "cwd": "${workspaceFolder}/test",
             "program": "node_modules/hardhat/internal/cli/cli.js",
             "args": [
                 "run",
                 "scripts/test.ts"
             ]
-        },
-        {
-            "type": "pwa-node",
-            "request": "launch",
-            "name": "Run Test (anvil)",
-            "cwd": "${workspaceFolder}/test",
-            "program": "node_modules/hardhat/internal/cli/cli.js",
-            "args": [
-                "run",
-                "scripts/test.ts"
-            ],
-            "env": {
-                "HARDHAT_NETWORK": "anvil"
-            }
         }
     ]
 }
