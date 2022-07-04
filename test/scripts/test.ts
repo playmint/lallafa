@@ -1,7 +1,7 @@
 import hre from "hardhat";
 import { Storage__factory } from "../typechain-types";
 import fs from "fs";
-import { profile } from "../../src";
+import { profile, sourcesProfileToString, instructionsProfileToString } from "../../src";
 
 
 async function main() {
@@ -41,23 +41,8 @@ async function main() {
         },
         buildInfo.input);
 
-    let biggestGasNumber = 0;
-    for (const sourceId in result.sources) {
-        for (const line of result.sources[sourceId].lines) {
-            biggestGasNumber = Math.max(biggestGasNumber, line.gas);
-        }
-    }
-    const gasDigits = Math.floor(Math.log10(biggestGasNumber)) + 1;
-
-    let outFile = "";
-    for (const sourceId in result.sources) {
-        outFile += `// ${result.sources[sourceId].name}\n\n`;
-        for (const line of result.sources[sourceId].lines) {
-            outFile += `${line.gas.toString().padStart(gasDigits, "0")}\t${line.text}\n`;
-        }
-    }
-
-    fs.writeFileSync("out.txt", outFile);
+    fs.writeFileSync("sources.txt", sourcesProfileToString(result.sources));
+    fs.writeFileSync("instructions.txt", instructionsProfileToString(result.instructions));
 }
 
 main().catch(e => console.error(e));

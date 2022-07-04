@@ -31,7 +31,23 @@ export type GeneratedSource = {
     contents: string;
 };
 
+export type InstructionsProfile = {
+    [instructionId: number]: number
+}
+
+export type SourcesProfile = {
+    [source: number]: {
+        name: string,
+        lines: {
+            gas: number,
+            text: string
+        }[]
+    }
+}
+
 export function profile(trace: DebugTrace, compilerOutput: CompilerOutput, inputSources: { sources: { [name: string]: { content: string } } }) {
+    // TODO get this to work with deployment txns too
+    // TODO handle calls to other contracts etc
     const pcToInstruction = parseBytecode(compilerOutput.deployedBytecode.bytecode);
     const sourceMap = parseSourceMap(compilerOutput.deployedBytecode.sourceMap);
 
@@ -67,8 +83,8 @@ export function profile(trace: DebugTrace, compilerOutput: CompilerOutput, input
         instructionToSourceLine.push(findSourceLine(sourceMap[i].sourceId, sourceMap[i].rangeStart));
     }
 
-    const instructions: { [instructionId: number]: number } = {};
-    const sources: { [source: number]: { name: string, lines: { gas: number, text: string }[] } } = {};
+    const instructions: InstructionsProfile = {};
+    const sources: SourcesProfile = {};
     for (const log of trace.structLogs) {
         // TODO throw if we can't map pc back to instruction, or an entry in source map, etc
         const instructionId = pcToInstruction[log.pc];
@@ -96,6 +112,32 @@ export function profile(trace: DebugTrace, compilerOutput: CompilerOutput, input
         instructions,
         sources
     };
+}
+
+export function sourcesProfileToString(sourcesProfile: SourcesProfile) {
+    let biggestGasNumber = 0;
+    for (const sourceId in sourcesProfile) {
+        for (const line of sourcesProfile[sourceId].lines) {
+            biggestGasNumber = Math.max(biggestGasNumber, line.gas);
+        }
+    }
+    const gasDigits = Math.floor(Math.log10(biggestGasNumber)) + 1;
+
+    let str = "";
+    for (const sourceId in sourcesProfile) {
+        str += `// ${sourcesProfile[sourceId].name}\n\n`;
+        for (const line of sourcesProfile[sourceId].lines) {
+            str += `${line.gas.toString().padStart(gasDigits, "0")}\t${line.text}\n`;
+        }
+    }
+
+    return str;
+}
+
+export function instructionsProfileToString(instructionsProfile: SourcesProfile) {
+    let str = "";
+
+    return str;
 }
 
 // TODO remove export where uneccessary
