@@ -32,31 +32,27 @@ export type GeneratedSource = {
 };
 
 export function profile(trace: DebugTrace, compilerOutput: CompilerOutput, inputSources: { sources: { [name: string]: { content: string } } }) {
-    // TODO remove this
-    let totalGas = 0;
-    for (const log of trace.structLogs) {
-        totalGas += log.gasCost;
-    }
-    if (trace.gas != totalGas) {
-        throw "gas doesn't match totalgas";
-    }
-
     const pcToInstruction = parseBytecode(compilerOutput.deployedBytecode.bytecode);
     const sourceMap = parseSourceMap(compilerOutput.deployedBytecode.sourceMap);
 
-    const sources: { [id: number]: string[] } = {};
+    const sourcesById: { [id: number]: { name: string, lines: string[] } } = {};
     for (const sourceName in compilerOutput.sources) {
         const sourceId = compilerOutput.sources[sourceName].id;
-        const content = inputSources.sources[sourceName].content;
-        sources[sourceId] = content.split("\n");
+        sourcesById[sourceId] = {
+            name: sourceName,
+            lines: inputSources.sources[sourceName].content.split("\n")
+        };
     }
     for (const generatedSource of compilerOutput.deployedBytecode.generatedSources) {
-        sources[generatedSource.id] = generatedSource.contents.split("\n");
+        sourcesById[generatedSource.id] = {
+            name: generatedSource.name,
+            lines: generatedSource.contents.split("\n")
+        };
     }
 
     const instructionToSourceLine: number[] = [];
     function findSourceLine(sourceId: number, offset: number) {
-        const lines = sources[sourceId];
+        const lines = sourcesById[sourceId].lines;
         let totalChars = 0;
         for (let i = 0; i < lines.length; ++i) {
             totalChars += lines[i].length + 1;
@@ -71,30 +67,35 @@ export function profile(trace: DebugTrace, compilerOutput: CompilerOutput, input
         instructionToSourceLine.push(findSourceLine(sourceMap[i].sourceId, sourceMap[i].rangeStart));
     }
 
-    const gasPerInstruction: { [instructionId: number]: number } = {};
-    const gasPerSource: { [source: number]: { [line: number]: number } } = {};
+    const instructions: { [instructionId: number]: number } = {};
+    const sources: { [source: number]: { name: string, lines: { gas: number, text: string }[] } } = {};
     for (const log of trace.structLogs) {
         // TODO throw if we can't map pc back to instruction, or an entry in source map, etc
         const instructionId = pcToInstruction[log.pc];
 
-        if (!gasPerInstruction[instructionId]) {
-            gasPerInstruction[instructionId] = 0;
+        if (!instructions[instructionId]) {
+            instructions[instructionId] = 0;
         }
-        gasPerInstruction[instructionId] += log.gasCost;
+        instructions[instructionId] += log.gasCost;
 
 
         const sourceMapEntry = sourceMap[instructionId];
 
-        if (!gasPerSource[sourceMapEntry.sourceId]) {
-            gasPerSource[sourceMapEntry.sourceId] = {};
+        if (!sources[sourceMapEntry.sourceId]) {
+            sources[sourceMapEntry.sourceId] = {
+                name: sourcesById[sourceMapEntry.sourceId].name,
+                lines: sourcesById[sourceMapEntry.sourceId].lines.map((line) => { return { text: line, gas: 0 }; })
+            };
         }
 
         const line = instructionToSourceLine[instructionId];
-        if (!gasPerSource[sourceMapEntry.sourceId][line]) {
-            gasPerSource[sourceMapEntry.sourceId][line] = 0;
-        }
-        gasPerSource[sourceMapEntry.sourceId][line] += log.gasCost;
+        sources[sourceMapEntry.sourceId].lines[line].gas += log.gasCost;
     }
+
+    return {
+        instructions,
+        sources
+    };
 }
 
 // TODO remove export where uneccessary
@@ -139,7 +140,7 @@ function parseSourceMap(sourceMap: string) {
             }
         }
 
-        entries.push(entry);
+        entries.push({ ...entry });
     }
 
     return entries;

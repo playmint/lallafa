@@ -23,8 +23,41 @@ async function main() {
     if (!buildInfo) {
         throw new Error("couldn't find build info");
     }
+    const output = buildInfo.output.contracts["contracts/Storage.sol"]["Storage"];
 
-    profile(JSON.parse(fs.readFileSync("debug_trace.txt").toString()), buildInfo.output, buildInfo.input.sources);
+    const result = profile(JSON.parse(fs.readFileSync("debug_trace.txt").toString()),
+        {
+            bytecode: {
+                bytecode: output.evm.bytecode.object,
+                sourceMap: output.evm.bytecode.sourceMap,
+                generatedSources: (output.evm.bytecode as any).generatedSources || []
+            },
+            deployedBytecode: {
+                bytecode: output.evm.deployedBytecode.object,
+                sourceMap: output.evm.deployedBytecode.sourceMap,
+                generatedSources: (output.evm.deployedBytecode as any).generatedSources || []
+            },
+            sources: buildInfo.output.sources
+        },
+        buildInfo.input);
+
+    let biggestGasNumber = 0;
+    for (const sourceId in result.sources) {
+        for (const line of result.sources[sourceId].lines) {
+            biggestGasNumber = Math.max(biggestGasNumber, line.gas);
+        }
+    }
+    const gasDigits = Math.floor(Math.log10(biggestGasNumber)) + 1;
+
+    let outFile = "";
+    for (const sourceId in result.sources) {
+        outFile += `// ${result.sources[sourceId].name}\n\n`;
+        for (const line of result.sources[sourceId].lines) {
+            outFile += `${line.gas.toString().padStart(gasDigits, "0")}\t${line.text}\n`;
+        }
+    }
+
+    fs.writeFileSync("out.txt", outFile);
 }
 
 main().catch(e => console.error(e));
