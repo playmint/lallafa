@@ -16,7 +16,7 @@ export type DebugTraceLog = {
 export type CompilerOutput = {
     bytecode: ContractBytecode;
     deployedBytecode: ContractBytecode;
-    sources: { [source: string]: { id: number, ast: any } }
+    sources: { [source: string]: { id: number, ast: any } };
 };
 
 export type ContractBytecode = {
@@ -25,7 +25,7 @@ export type ContractBytecode = {
     generatedSources: GeneratedSource[];
 };
 
-export type GeneratedSource = {
+type GeneratedSource = {
     id: number;
     name: string;
     contents: string;
@@ -41,11 +41,11 @@ export type InstructionsProfile = {
 
 export type SourcesProfile = {
     [source: number]: {
-        name: string,
+        name: string;
         lines: {
-            gas: number,
-            text: string
-        }[]
+            gas: number;
+            text: string;
+        }[];
     }
 };
 
@@ -74,10 +74,22 @@ type AstFunctionParameter = {
     nodeType: "VariableDeclaration";
     typeName: {
         name: string;
-    }
+    };
 };
 
-export function profile(trace: DebugTrace, compilerOutput: CompilerOutput, inputSources: { sources: { [name: string]: { content: string } } }) {
+type SourceMapEntry = {
+    rangeStart: number;
+    rangeLength: number;
+    sourceId: number;
+    jump: Jump;
+    modifierDepth: number;
+}
+
+type Jump = "in" | "out" | "-";
+
+export function profile(trace: DebugTrace, isDeploymentTransaction: boolean, compilerOutput: CompilerOutput, inputSources: { sources: { [name: string]: { content: string } } }) {
+    const bytecode = isDeploymentTransaction ? compilerOutput.bytecode : compilerOutput.deployedBytecode;
+
     // source maps refer to source ids, so create a lookup of source ids to
     // sources, both generated and non-generated
     const sourcesById: { [id: number]: { name: string, lines: string[], ast: AstNode } } = {};
@@ -89,7 +101,7 @@ export function profile(trace: DebugTrace, compilerOutput: CompilerOutput, input
             ast: compilerOutput.sources[sourceName].ast
         };
     }
-    for (const generatedSource of compilerOutput.deployedBytecode.generatedSources) {
+    for (const generatedSource of bytecode.generatedSources) {
         sourcesById[generatedSource.id] = {
             name: generatedSource.name,
             lines: generatedSource.contents.split("\n"),
@@ -97,10 +109,9 @@ export function profile(trace: DebugTrace, compilerOutput: CompilerOutput, input
         };
     }
 
-    // TODO get this to work with deployment txns too
     // TODO handle calls to other contracts etc
-    const instructions = parseBytecode(compilerOutput.deployedBytecode.bytecode);
-    const sourceMap = parseSourceMap(compilerOutput.deployedBytecode.sourceMap);
+    const sourceMap = parseSourceMap(bytecode.sourceMap);
+    const instructions = parseBytecode(bytecode.bytecode, sourceMap.length);
 
     // generate human readable names for jumpdests
     const jumpDestNames: { [pc: number]: string } = {};
@@ -254,17 +265,18 @@ export function profile(trace: DebugTrace, compilerOutput: CompilerOutput, input
 export function sourcesProfileToString(sourcesProfile: SourcesProfile) {
     let biggestGasNumber = 0;
     for (const sourceId in sourcesProfile) {
+        biggestGasNumber = sourcesProfile[sourceId].lines.reduce((biggest, line) => Math.max(biggest, line.gas), biggestGasNumber);
         for (const line of sourcesProfile[sourceId].lines) {
             biggestGasNumber = Math.max(biggestGasNumber, line.gas);
         }
     }
-    const gasDigits = Math.floor(Math.log10(biggestGasNumber)) + 1;
+    const gasPad = Math.floor(Math.log10(biggestGasNumber)) + 1;
 
     let str = "";
     for (const sourceId in sourcesProfile) {
         str += `// ${sourcesProfile[sourceId].name}\n\n`;
         for (const line of sourcesProfile[sourceId].lines) {
-            str += `${line.gas.toString().padStart(gasDigits, "0")}\t${line.text}\n`;
+            str += `${line.gas.toString().padEnd(gasPad, " ")}\t${line.text}\n`;
         }
     }
 
@@ -281,9 +293,7 @@ export function instructionsProfileToString(instructionsProfile: InstructionsPro
     const pcPad = Math.floor(Math.log(instructionsProfile[instructionsProfile.length - 1].pc) / Math.log(16)) + 1;
 
     const asmPad = instructionsProfile.reduce(
-        (longestAsmStr, instruction) => {
-            return Math.max(longestAsmStr, instruction.asm.length)
-        }, 0);
+        (longestAsmStr, instruction) => Math.max(longestAsmStr, instruction.asm.length), 0);
 
     let str = "";
     for (const instruction of instructionsProfile) {
@@ -292,17 +302,6 @@ export function instructionsProfileToString(instructionsProfile: InstructionsPro
 
     return str;
 }
-
-// TODO remove export where uneccessary
-export type SourceMapEntry = {
-    rangeStart: number;
-    rangeLength: number;
-    sourceId: number;
-    jump: Jump;
-    modifierDepth: number;
-}
-
-export type Jump = "in" | "out" | "-";
 
 function parseSourceMap(sourceMap: string) {
     const entries: SourceMapEntry[] = [];
@@ -341,12 +340,13 @@ function parseSourceMap(sourceMap: string) {
     return entries;
 }
 
-function parseBytecode(bytecode: string) {
+function parseBytecode(bytecode: string, instructionCount: number) {
     const instructions: { bytecode: string, asm: string, pc: number }[] = [];
     const pcToInstructionId: { [pc: number]: number } = {};
+
     let i = 0;
     let currentInstruction = 0;
-    while (i < bytecode.length) {
+    while (i < bytecode.length && currentInstruction < instructionCount) {
         const pc = i / 2;
         pcToInstructionId[pc] = currentInstruction;
 
