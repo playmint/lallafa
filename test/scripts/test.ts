@@ -55,7 +55,7 @@ async function main() {
         fs.writeFileSync("storage_test_profile_instructions.txt", instructionsProfileToString(result.instructions));
     }
     {
-        if (!fs.existsSync("calltest_simple_test_debug_trace.txt") ||
+        if (!fs.existsSync("calltest_simple_debug_trace.txt") ||
             !fs.existsSync("calltest_complex_debug_trace.txt")) {
             const callTestAFactory = new CallTestA__factory((await hre.ethers.getSigners())[0]);
             const callTestBFactory = new CallTestB__factory((await hre.ethers.getSigners())[0]);
@@ -68,9 +68,47 @@ async function main() {
             const simpleTx = await (await a.simple(42)).wait();
             const complexTx = await (await a.complex(42)).wait();
 
-            await saveDebugTrace("calltest_simple_test_debug_trace.txt", simpleTx.transactionHash);
+            await saveDebugTrace("calltest_simple_debug_trace.txt", simpleTx.transactionHash);
             await saveDebugTrace("calltest_complex_debug_trace.txt", complexTx.transactionHash);
         }
+
+        const buildInfoA = await hre.artifacts.getBuildInfo("contracts/CallTest.sol:CallTestA");
+        if (!buildInfoA) {
+            throw new Error("couldn't find build info for CallTestA");
+        }
+        const outputA = buildInfoA.output.contracts["contracts/CallTest.sol"]["CallTestA"];
+
+        const compilerOutput = {
+            bytecode: {
+                bytecode: outputA.evm.bytecode.object,
+                sourceMap: outputA.evm.bytecode.sourceMap,
+                generatedSources: (outputA.evm.bytecode as any).generatedSources || []
+            },
+            deployedBytecode: {
+                bytecode: outputA.evm.deployedBytecode.object,
+                sourceMap: outputA.evm.deployedBytecode.sourceMap,
+                generatedSources: (outputA.evm.deployedBytecode as any).generatedSources || []
+            },
+            sources: buildInfoA.output.sources
+        };
+
+        let result = profile(
+            JSON.parse(fs.readFileSync("calltest_simple_debug_trace.txt").toString()),
+            true,
+            compilerOutput,
+            buildInfoA.input);
+
+        fs.writeFileSync("calltest_simple_profile_sources.txt", sourcesProfileToString(result.sources));
+        fs.writeFileSync("calltest_simple_profile_instructions.txt", instructionsProfileToString(result.instructions));
+
+        result = profile(
+            JSON.parse(fs.readFileSync("calltest_complex_debug_trace.txt").toString()),
+            false,
+            compilerOutput,
+            buildInfoA.input);
+
+        fs.writeFileSync("calltest_complex_profile_sources.txt", sourcesProfileToString(result.sources));
+        fs.writeFileSync("calltest_complex_profile_instructions.txt", instructionsProfileToString(result.instructions));
     }
 }
 

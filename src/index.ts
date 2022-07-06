@@ -37,6 +37,7 @@ export type InstructionsProfile = {
     bytecode: string;
     asm: string;
     pc: number;
+    op: string;
 }[];
 
 export type SourcesProfile = {
@@ -232,14 +233,21 @@ export function profile(trace: DebugTrace, isDeploymentTransaction: boolean, com
             bytecode: "0x" + instruction.bytecode,
             asm: instruction.asm,
             pc: instruction.pc,
-            gas: 0
+            gas: 0,
+            op: instruction.op
         });
     }
 
     const sourcesProfile: SourcesProfile = {};
     for (const log of trace.structLogs) {
-        // TODO throw if we can't map pc back to instruction, or an entry in source map, etc
+        if (instructions.pcToInstructionId[log.pc] === undefined) {
+            throw new Error(`couldn't find instruction for PC ${log.pc}`);
+        }
         const instructionId = instructions.pcToInstructionId[log.pc];
+
+        if (log.op != instructionsProfile[instructionId].op) {
+            throw new Error(`op in debug trace ${log.op} not same as instruction found in bytecode ${instructionsProfile[instructionId].op}`);
+        }
 
         instructionsProfile[instructionId].gas += log.gasCost;
 
@@ -341,7 +349,7 @@ function parseSourceMap(sourceMap: string) {
 }
 
 function parseBytecode(bytecode: string, instructionCount: number) {
-    const instructions: { bytecode: string, asm: string, pc: number }[] = [];
+    const instructions: { bytecode: string, asm: string, pc: number, op: string }[] = [];
     const pcToInstructionId: { [pc: number]: number } = {};
 
     let i = 0;
@@ -352,7 +360,8 @@ function parseBytecode(bytecode: string, instructionCount: number) {
 
         let instructionBytecode = bytecode.substring(i, i + 2).toUpperCase();
         const opcode = parseInt(instructionBytecode, 16);
-        let asm = opcodes[opcode] ? opcodes[opcode] : "UNKNOWN";
+        const op = opcodes[opcode] ? opcodes[opcode] : "UNKNOWN";
+        let asm = op;
 
         if (opcode >= 0x60 && opcode <= 0x7F) {
             // PUSHX opcodes are followed by 1+ bytes
@@ -370,7 +379,8 @@ function parseBytecode(bytecode: string, instructionCount: number) {
         instructions.push({
             bytecode: instructionBytecode,
             asm,
-            pc
+            pc,
+            op
         });
 
         i += 2;
