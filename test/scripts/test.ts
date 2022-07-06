@@ -94,7 +94,7 @@ async function main() {
 
         let result = profile(
             JSON.parse(fs.readFileSync("calltest_simple_debug_trace.txt").toString()),
-            true,
+            false,
             compilerOutput,
             buildInfoA.input);
 

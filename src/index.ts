@@ -239,7 +239,15 @@ export function profile(trace: DebugTrace, isDeploymentTransaction: boolean, com
     }
 
     const sourcesProfile: SourcesProfile = {};
+    let callDepth = 0;
     for (const log of trace.structLogs) {
+        if (callDepth > 0) {
+            if (log.op == "STOP" || log.op == "RETURN") {
+                --callDepth;
+            }
+            continue;
+        }
+
         if (instructions.pcToInstructionId[log.pc] === undefined) {
             throw new Error(`couldn't find instruction for PC ${log.pc}`);
         }
@@ -262,6 +270,10 @@ export function profile(trace: DebugTrace, isDeploymentTransaction: boolean, com
 
         const line = instructionToSourceLine[instructionId];
         sourcesProfile[sourceMapEntry.sourceId].lines[line].gas += log.gasCost;
+
+        if (log.op == "CALL" || log.op == "CALLCODE" || log.op == "STATICCALL" || log.op == "DELEGATECALL") {
+            ++callDepth;
+        }
     }
 
     return {
