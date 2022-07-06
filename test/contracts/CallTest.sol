@@ -34,5 +34,7 @@ contract CallTestB {
         _value = value;
     }
 
-    function complex(uint256 value) public {}
+    function complex(uint256 value) public {
+        _a.complex2(value);
+    }
 }

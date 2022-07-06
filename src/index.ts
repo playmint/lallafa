@@ -242,8 +242,13 @@ export function profile(trace: DebugTrace, isDeploymentTransaction: boolean, com
     let callDepth = 0;
     for (const log of trace.structLogs) {
         if (callDepth > 0) {
-            if (log.op == "STOP" || log.op == "RETURN") {
+            if (log.op == "CALL" || log.op == "CALLCODE" || log.op == "STATICCALL" || log.op == "DELEGATECALL") {
+                ++callDepth;
+                console.log(callDepth);
+            }
+            else if (log.op == "STOP" || log.op == "RETURN") {
                 --callDepth;
+                console.log(callDepth);
             }
             continue;
         }
@@ -273,6 +278,7 @@ export function profile(trace: DebugTrace, isDeploymentTransaction: boolean, com
 
         if (log.op == "CALL" || log.op == "CALLCODE" || log.op == "STATICCALL" || log.op == "DELEGATECALL") {
             ++callDepth;
+            console.log(callDepth);
         }
     }
 
