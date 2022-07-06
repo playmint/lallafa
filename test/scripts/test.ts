@@ -68,8 +68,8 @@ async function main() {
             const simpleTx = await (await a.simple(42)).wait();
             const complexTx = await (await a.complex(42)).wait();
 
-            await saveDebugTrace("calltest_simple_debug_trace.txt", simpleTx.transactionHash);
-            await saveDebugTrace("calltest_complex_debug_trace.txt", complexTx.transactionHash);
+            await saveDebugTrace("calltest_simple_debug_trace.txt", simpleTx.transactionHash, false);
+            await saveDebugTrace("calltest_complex_debug_trace.txt", complexTx.transactionHash, false);
         }
 
         const buildInfoA = await hre.artifacts.getBuildInfo("contracts/CallTest.sol:CallTestA");
@@ -92,6 +92,8 @@ async function main() {
             sources: buildInfoA.output.sources
         };
 
+
+
         let result = profile(
             JSON.parse(fs.readFileSync("calltest_simple_debug_trace.txt").toString()),
             false,
@@ -112,10 +114,10 @@ async function main() {
     }
 }
 
-async function saveDebugTrace(filePath: string, txHash: string) {
+async function saveDebugTrace(filePath: string, txHash: string, disableStack = true) {
     const debugTrace = await hre.ethers.provider.send("debug_traceTransaction",
         [txHash, {
-            "disableStack": true,
+            "disableStack": disableStack,
             "disableMemory": true,
             "disableStorage": true
         }]);

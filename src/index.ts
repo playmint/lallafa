@@ -11,6 +11,7 @@ export type DebugTraceLog = {
     gas: number;
     gasCost: number;
     depth: number;
+    stack?: string[];
 };
 
 export type CompilerOutput = {
@@ -239,7 +240,23 @@ export function profile(trace: DebugTrace, isDeploymentTransaction: boolean, com
     }
 
     const sourcesProfile: SourcesProfile = {};
-    for (const log of trace.structLogs) {
+    let currentDepth = 1;
+    for (let i = 0; i < trace.structLogs.length; ++i) {
+        const log = trace.structLogs[i];
+
+        if (currentDepth != log.depth) {
+            if (log.depth > currentDepth) {
+                const previousLog = trace.structLogs[i - 1];
+                if (previousLog.stack) {
+                    // call/callcode/staticcall/delegatecall all put gas at the top of the stack,
+                    // and then the address of the contract being called
+                    const address = "0x" + previousLog.stack[previousLog.stack.length - 2].substring(24).toUpperCase();
+                    console.log("calling", address);
+                }
+            }
+
+            currentDepth = log.depth;
+        }
         if (log.depth > 1) {
             continue;
         }
