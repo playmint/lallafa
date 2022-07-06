@@ -239,17 +239,8 @@ export function profile(trace: DebugTrace, isDeploymentTransaction: boolean, com
     }
 
     const sourcesProfile: SourcesProfile = {};
-    let callDepth = 0;
     for (const log of trace.structLogs) {
-        if (callDepth > 0) {
-            if (log.op == "CALL" || log.op == "CALLCODE" || log.op == "STATICCALL" || log.op == "DELEGATECALL") {
-                ++callDepth;
-                console.log(callDepth);
-            }
-            else if (log.op == "STOP" || log.op == "RETURN") {
-                --callDepth;
-                console.log(callDepth);
-            }
+        if (log.depth > 1) {
             continue;
         }
 
@@ -275,11 +266,6 @@ export function profile(trace: DebugTrace, isDeploymentTransaction: boolean, com
 
         const line = instructionToSourceLine[instructionId];
         sourcesProfile[sourceMapEntry.sourceId].lines[line].gas += log.gasCost;
-
-        if (log.op == "CALL" || log.op == "CALLCODE" || log.op == "STATICCALL" || log.op == "DELEGATECALL") {
-            ++callDepth;
-            console.log(callDepth);
-        }
     }
 
     return {
