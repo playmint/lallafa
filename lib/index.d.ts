@@ -10,6 +10,20 @@ export declare type DebugTraceLog = {
     gas: number;
     gasCost: number;
     depth: number;
+    stack?: string[];
+};
+export declare type ContractInfoMap = {
+    [address: string]: ContractInfo;
+};
+export declare type ContractInfo = {
+    output: CompilerOutput;
+    input: {
+        sources: {
+            [name: string]: {
+                content: string;
+            };
+        };
+    };
 };
 export declare type CompilerOutput = {
     bytecode: ContractBytecode;
@@ -26,7 +40,7 @@ export declare type ContractBytecode = {
     sourceMap: string;
     generatedSources: GeneratedSource[];
 };
-export declare type GeneratedSource = {
+declare type GeneratedSource = {
     id: number;
     name: string;
     contents: string;
@@ -37,6 +51,7 @@ export declare type InstructionsProfile = {
     bytecode: string;
     asm: string;
     pc: number;
+    op: string;
 }[];
 export declare type SourcesProfile = {
     [source: number]: {
@@ -47,24 +62,14 @@ export declare type SourcesProfile = {
         }[];
     };
 };
-export declare function profile(trace: DebugTrace, compilerOutput: CompilerOutput, inputSources: {
-    sources: {
-        [name: string]: {
-            content: string;
-        };
+export declare type Profile = {
+    [address: string]: {
+        instructionsProfile: InstructionsProfile;
+        sourcesProfile: SourcesProfile;
     };
-}): {
-    instructions: InstructionsProfile;
-    sources: SourcesProfile;
 };
-export declare function sourcesProfileToString(sourcesProfile: SourcesProfile): string;
-export declare function instructionsProfileToString(instructionsProfile: InstructionsProfile): string;
-export declare type SourceMapEntry = {
-    rangeStart: number;
-    rangeLength: number;
-    sourceId: number;
-    jump: Jump;
-    modifierDepth: number;
-};
-export declare type Jump = "in" | "out" | "-";
+export declare function profile(trace: DebugTrace, isDeploymentTransaction: boolean, address: string, contracts: ContractInfoMap): Profile;
+export declare function sourcesProfileToString(profile: Profile): string;
+export declare function instructionsProfileToString(profile: Profile): string;
+export {};
 //# sourceMappingURL=index.d.ts.map

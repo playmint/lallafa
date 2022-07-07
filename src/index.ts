@@ -14,6 +14,17 @@ export type DebugTraceLog = {
     stack?: string[];
 };
 
+export type ContractInfoMap = {
+    [address: string]: ContractInfo;
+};
+
+export type ContractInfo = {
+    output: CompilerOutput;
+    input: {
+        sources: { [name: string]: { content: string } }
+    };
+};
+
 export type CompilerOutput = {
     bytecode: ContractBytecode;
     deployedBytecode: ContractBytecode;
@@ -89,8 +100,36 @@ type SourceMapEntry = {
 
 type Jump = "in" | "out" | "-";
 
-export function profile(trace: DebugTrace, isDeploymentTransaction: boolean, compilerOutput: CompilerOutput, inputSources: { sources: { [name: string]: { content: string } } }) {
-    const bytecode = isDeploymentTransaction ? compilerOutput.bytecode : compilerOutput.deployedBytecode;
+type ContractProfile = {
+    sourcesProfile: SourcesProfile;
+    instructionsProfile: InstructionsProfile;
+    pcToInstructionId: { [pc: number]: number };
+    sourceMap: SourceMapEntry[];
+    sourcesById: SourcesById;
+    instructionToSourceLine: number[];
+};
+
+type SourcesById = {
+    [id: number]: {
+        name: string;
+        lines: string[];
+        ast: AstNode
+    }
+};
+
+type ContractProfiles = {
+    [address: string]: ContractProfile;
+};
+
+export type Profile = {
+    [address: string]: {
+        instructionsProfile: InstructionsProfile;
+        sourcesProfile: SourcesProfile;
+    }
+};
+
+export function profile(trace: DebugTrace, isDeploymentTransaction: boolean, address: string, contracts: ContractInfoMap): Profile {
+    /*const bytecode = isDeploymentTransaction ? compilerOutput.bytecode : compilerOutput.deployedBytecode;
 
     // source maps refer to source ids, so create a lookup of source ids to
     // sources, both generated and non-generated
@@ -111,7 +150,277 @@ export function profile(trace: DebugTrace, isDeploymentTransaction: boolean, com
         };
     }
 
-    // TODO handle calls to other contracts etc
+    const sourceMap = parseSourceMap(bytecode.sourceMap);
+    const instructions = parseBytecode(bytecode.bytecode, sourceMap.length);
+
+    // generate human readable names for jumpdests
+    const jumpDestNames: { [pc: number]: string } = {};
+    const functionJumpDestCounts: { [sourceId: number]: { [functionSig: string]: number } } = {};
+    for (let i = 0; i < instructions.instructions.length; ++i) {
+        if (instructions.instructions[i].asm == "JUMPDEST") {
+            const sourceMapEntry = sourceMap[i];
+            const rangeStart = sourceMapEntry.rangeStart;
+            const rangeEnd = sourceMapEntry.rangeStart + sourceMapEntry.rangeLength - 1;
+            const ast = sourcesById[sourceMapEntry.sourceId].ast;
+
+            // use function so we can be recursive
+            function astFunctionSearch(ast: AstNode): AstNode | null {
+                let childNodes: AstNode[] = [];
+                if ("nodes" in ast) {
+                    childNodes = ast.nodes;
+                }
+                else if ("statements" in ast) {
+                    childNodes = ast.statements;
+                }
+
+                for (const node of childNodes) {
+                    const srcSplit = node.src.split(":");
+                    const nodeRangeStart = parseInt(srcSplit[0]);
+                    const nodeRangeEnd = nodeRangeStart + parseInt(srcSplit[1]) - 1;
+
+                    if (rangeStart >= nodeRangeStart && rangeEnd <= nodeRangeEnd) {
+                        if (node.nodeType == "FunctionDefinition" ||
+                            node.nodeType == "YulFunctionDefinition") {
+                            return node;
+                        }
+                        return astFunctionSearch(node);
+                    }
+                }
+
+                return null;
+            }
+
+            const functionNode = astFunctionSearch(ast);
+            if (functionNode) {
+                let functionSig = "";
+                if (functionNode.nodeType == "FunctionDefinition") {
+                    functionSig = `${functionNode.name}${functionNode.parameters.parameters.length > 0 ? `_${functionNode.parameters.parameters.map(param => param.typeName.name).join("_")}` : ""}`;
+                }
+                else if (functionNode.nodeType == "YulFunctionDefinition") {
+                    functionSig = `${functionNode.name}`;
+                }
+
+                if (functionSig != "") {
+                    // some functions can have multiple jumpdests within, so
+                    // keep track of number of jumpdests per function so that
+                    // each can have a unique name
+                    if (!functionJumpDestCounts[sourceMapEntry.sourceId]) {
+                        functionJumpDestCounts[sourceMapEntry.sourceId] = {};
+                    }
+                    if (!functionJumpDestCounts[sourceMapEntry.sourceId][functionSig]) {
+                        functionJumpDestCounts[sourceMapEntry.sourceId][functionSig] = 0;
+                    }
+
+                    const jumpDestCount = functionJumpDestCounts[sourceMapEntry.sourceId][functionSig];
+                    ++functionJumpDestCounts[sourceMapEntry.sourceId][functionSig];
+
+                    const jumpDestName = `${functionSig}_${jumpDestCount}`;
+                    jumpDestNames[instructions.instructions[i].pc] = jumpDestName;
+
+                    instructions.instructions[i].asm += ` [${jumpDestName}]`;
+                }
+            }
+
+        }
+    }
+
+    // generate human readable names for jumps
+    for (let i = 0; i < instructions.instructions.length; ++i) {
+        if (instructions.instructions[i].asm == "JUMP" ||
+            instructions.instructions[i].asm == "JUMPI") {
+            if (instructions.instructions[i - 1].asm.startsWith("PUSH")) {
+                const bytes = instructions.instructions[i - 1].asm.split(" ")[1];
+                const pc = parseInt(bytes.substring(2), 16);
+                if (jumpDestNames[pc]) {
+                    instructions.instructions[i - 1].asm += ` [${jumpDestNames[pc]}]`;
+                }
+                instructions.instructions[i].asm += " [in]";
+            }
+            else if (instructions.instructions[i - 1].asm == "POP") {
+                instructions.instructions[i].asm += " [out]";
+            }
+        }
+    }
+
+    // each instruction in the source map will have a file offset, so use this
+    // to figure out the actual line number in each file that the instruction
+    // corresponds to. Cache this as may execute the same instruction many times
+    const instructionToSourceLine: number[] = [];
+    for (let instructionId = 0; instructionId < sourceMap.length; ++instructionId) {
+        const sourceMapEntry = sourceMap[instructionId];
+        const offset = sourceMapEntry.rangeStart;
+        const lines = sourcesById[sourceMapEntry.sourceId].lines;
+        let totalChars = 0;
+        let line: number;
+        for (line = 0; line < lines.length; ++line) {
+            totalChars += lines[line].length + 1; // + 1 for the \n character which has been removed already
+            if (offset < totalChars) {
+                break;
+            }
+        }
+        if (line == lines.length) {
+            console.warn(`source line for instruction ${instructionId}(${sourceMapEntry.sourceId}:${sourceMapEntry.rangeStart}:${sourceMapEntry.rangeLength}) not found`);
+            line = 0;
+        }
+
+        instructionToSourceLine.push(line);
+    }
+
+    const instructionsProfile: InstructionsProfile = [];
+    for (const instruction of instructions.instructions) {
+        instructionsProfile.push({
+            bytecode: "0x" + instruction.bytecode,
+            asm: instruction.asm,
+            pc: instruction.pc,
+            gas: 0,
+            op: instruction.op
+        });
+    }
+
+    const sourcesProfile: SourcesProfile = {};*/
+
+    const profiles: ContractProfiles = {};
+    const profile = createProfileForContract(contracts[address], isDeploymentTransaction);
+    profiles[address.toUpperCase()] = profile;
+
+    let currentDepth = 1;
+    for (let i = 0; i < trace.structLogs.length; ++i) {
+        const log = trace.structLogs[i];
+
+        if (currentDepth != log.depth) {
+            if (log.depth > currentDepth) {
+                const previousLog = trace.structLogs[i - 1];
+                if (previousLog.stack) {
+                    // call/callcode/staticcall/delegatecall all put gas at the top of the stack,
+                    // and then the address of the contract being called
+                    const address = "0x" + previousLog.stack[previousLog.stack.length - 2].substring(24).toUpperCase();
+                    console.log("calling", address);
+                }
+            }
+
+            currentDepth = log.depth;
+        }
+        if (log.depth > 1) {
+            continue;
+        }
+
+        if (profile.pcToInstructionId[log.pc] === undefined) {
+            throw new Error(`couldn't find instruction for PC ${log.pc}`);
+        }
+        const instructionId = profile.pcToInstructionId[log.pc];
+
+        if (log.op != profile.instructionsProfile[instructionId].op) {
+            throw new Error(`op in debug trace ${log.op} not same as instruction found in bytecode ${profile.instructionsProfile[instructionId].op}`);
+        }
+
+        profile.instructionsProfile[instructionId].gas += log.gasCost;
+
+        const sourceMapEntry = profile.sourceMap[instructionId];
+
+        // these are lazily created so we only output sources which contribute to gas usage for this txn
+        if (!profile.sourcesProfile[sourceMapEntry.sourceId]) {
+            profile.sourcesProfile[sourceMapEntry.sourceId] = {
+                name: profile.sourcesById[sourceMapEntry.sourceId].name,
+                lines: profile.sourcesById[sourceMapEntry.sourceId].lines.map((line) => { return { text: line, gas: 0 }; })
+            };
+        }
+
+        const line = profile.instructionToSourceLine[instructionId];
+        profile.sourcesProfile[sourceMapEntry.sourceId].lines[line].gas += log.gasCost;
+    }
+
+    const result: Profile = {};
+    for (const address in profiles) {
+        result[address] = {
+            instructionsProfile: profiles[address].instructionsProfile,
+            sourcesProfile: profiles[address].sourcesProfile
+        };
+    }
+
+    return result;
+}
+
+export function sourcesProfileToString(profile: Profile) {
+    let biggestGasNumber = 0;
+    for (const address in profile) {
+        const sourcesProfile = profile[address].sourcesProfile;
+        for (const sourceId in sourcesProfile) {
+            biggestGasNumber = sourcesProfile[sourceId].lines.reduce((biggest, line) => Math.max(biggest, line.gas), biggestGasNumber);
+            for (const line of sourcesProfile[sourceId].lines) {
+                biggestGasNumber = Math.max(biggestGasNumber, line.gas);
+            }
+        }
+    }
+    const gasPad = Math.floor(Math.log10(biggestGasNumber)) + 1;
+
+    let str = "";
+    for (const address in profile) {
+        str += `// ${address}\n============================================\n`;
+        const sourcesProfile = profile[address].sourcesProfile;
+        for (const sourceId in sourcesProfile) {
+            str += `\n// ${sourcesProfile[sourceId].name}\n\n`;
+            for (const line of sourcesProfile[sourceId].lines) {
+                str += `${line.gas.toString().padEnd(gasPad, " ")}\t${line.text}\n`;
+            }
+        }
+    }
+
+    return str;
+}
+
+export function instructionsProfileToString(profile: Profile) {
+    const biggestGasNumber = Object.values(profile).reduce((biggest, contractProfile) => {
+        return Math.max(biggest, contractProfile.instructionsProfile.reduce(
+            (biggest, instruction) => {
+                return Math.max(biggest, instruction.gas);
+            }, biggest));
+    }, 0);
+    const gasPad = Math.floor(Math.log10(biggestGasNumber)) + 1;
+
+    const biggestPc = Object.values(profile).reduce((biggest, contractProfile) => {
+        return Math.max(biggest, contractProfile.instructionsProfile[contractProfile.instructionsProfile.length - 1].pc);
+    }, 0);
+    const pcPad = Math.floor(Math.log(biggestPc) / Math.log(16)) + 1;
+
+    const asmPad = Object.values(profile).reduce((biggest, contractProfile) => {
+        return Math.max(biggest, contractProfile.instructionsProfile.reduce(
+            (longestAsmStr, instruction) => Math.max(longestAsmStr, instruction.asm.length), biggest));
+    }, 0);
+
+    let str = "";
+    for (const address in profile) {
+        str += `// ${address}\n============================================\n\n`;
+        const instructionsProfile = profile[address].instructionsProfile;
+        for (const instruction of instructionsProfile) {
+            str += `${instruction.gas.toString().padEnd(gasPad, " ")}\t${instruction.pc.toString(16).toUpperCase().padEnd(pcPad, " ")}\t${instruction.asm.toString().padEnd(asmPad, " ")}\t${instruction.bytecode}\n`;
+        }
+    }
+
+    return str;
+}
+
+function createProfileForContract(contractInfo: ContractInfo, isDeployment: boolean = false): ContractProfile {
+    const bytecode = isDeployment ? contractInfo.output.bytecode : contractInfo.output.deployedBytecode;
+
+    // source maps refer to source ids, so create a lookup of source ids to
+    // sources, both generated and non-generated
+    const sourcesById: SourcesById = {};
+    for (const sourceName in contractInfo.output.sources) {
+        const sourceId = contractInfo.output.sources[sourceName].id;
+        sourcesById[sourceId] = {
+            name: sourceName,
+            lines: contractInfo.input.sources[sourceName].content.split("\n"),
+            ast: contractInfo.output.sources[sourceName].ast
+        };
+    }
+    for (const generatedSource of bytecode.generatedSources) {
+        sourcesById[generatedSource.id] = {
+            name: generatedSource.name,
+            lines: generatedSource.contents.split("\n"),
+            ast: generatedSource.ast
+        };
+    }
+
     const sourceMap = parseSourceMap(bytecode.sourceMap);
     const instructions = parseBytecode(bytecode.bytecode, sourceMap.length);
 
@@ -240,96 +549,15 @@ export function profile(trace: DebugTrace, isDeploymentTransaction: boolean, com
     }
 
     const sourcesProfile: SourcesProfile = {};
-    let currentDepth = 1;
-    for (let i = 0; i < trace.structLogs.length; ++i) {
-        const log = trace.structLogs[i];
-
-        if (currentDepth != log.depth) {
-            if (log.depth > currentDepth) {
-                const previousLog = trace.structLogs[i - 1];
-                if (previousLog.stack) {
-                    // call/callcode/staticcall/delegatecall all put gas at the top of the stack,
-                    // and then the address of the contract being called
-                    const address = "0x" + previousLog.stack[previousLog.stack.length - 2].substring(24).toUpperCase();
-                    console.log("calling", address);
-                }
-            }
-
-            currentDepth = log.depth;
-        }
-        if (log.depth > 1) {
-            continue;
-        }
-
-        if (instructions.pcToInstructionId[log.pc] === undefined) {
-            throw new Error(`couldn't find instruction for PC ${log.pc}`);
-        }
-        const instructionId = instructions.pcToInstructionId[log.pc];
-
-        if (log.op != instructionsProfile[instructionId].op) {
-            throw new Error(`op in debug trace ${log.op} not same as instruction found in bytecode ${instructionsProfile[instructionId].op}`);
-        }
-
-        instructionsProfile[instructionId].gas += log.gasCost;
-
-        const sourceMapEntry = sourceMap[instructionId];
-
-        if (!sourcesProfile[sourceMapEntry.sourceId]) {
-            sourcesProfile[sourceMapEntry.sourceId] = {
-                name: sourcesById[sourceMapEntry.sourceId].name,
-                lines: sourcesById[sourceMapEntry.sourceId].lines.map((line) => { return { text: line, gas: 0 }; })
-            };
-        }
-
-        const line = instructionToSourceLine[instructionId];
-        sourcesProfile[sourceMapEntry.sourceId].lines[line].gas += log.gasCost;
-    }
 
     return {
-        instructions: instructionsProfile,
-        sources: sourcesProfile
-    };
-}
-
-export function sourcesProfileToString(sourcesProfile: SourcesProfile) {
-    let biggestGasNumber = 0;
-    for (const sourceId in sourcesProfile) {
-        biggestGasNumber = sourcesProfile[sourceId].lines.reduce((biggest, line) => Math.max(biggest, line.gas), biggestGasNumber);
-        for (const line of sourcesProfile[sourceId].lines) {
-            biggestGasNumber = Math.max(biggestGasNumber, line.gas);
-        }
+        instructionsProfile,
+        sourcesProfile,
+        pcToInstructionId: instructions.pcToInstructionId,
+        sourceMap,
+        sourcesById,
+        instructionToSourceLine
     }
-    const gasPad = Math.floor(Math.log10(biggestGasNumber)) + 1;
-
-    let str = "";
-    for (const sourceId in sourcesProfile) {
-        str += `// ${sourcesProfile[sourceId].name}\n\n`;
-        for (const line of sourcesProfile[sourceId].lines) {
-            str += `${line.gas.toString().padEnd(gasPad, " ")}\t${line.text}\n`;
-        }
-    }
-
-    return str;
-}
-
-export function instructionsProfileToString(instructionsProfile: InstructionsProfile) {
-    const biggestGasNumber = instructionsProfile.reduce(
-        (biggest, instruction) => {
-            return Math.max(biggest, instruction.gas);
-        }, 0);
-    const gasPad = Math.floor(Math.log10(biggestGasNumber)) + 1;
-
-    const pcPad = Math.floor(Math.log(instructionsProfile[instructionsProfile.length - 1].pc) / Math.log(16)) + 1;
-
-    const asmPad = instructionsProfile.reduce(
-        (longestAsmStr, instruction) => Math.max(longestAsmStr, instruction.asm.length), 0);
-
-    let str = "";
-    for (const instruction of instructionsProfile) {
-        str += `${instruction.gas.toString().padEnd(gasPad, " ")}\t${instruction.pc.toString(16).toUpperCase().padEnd(pcPad, " ")}\t${instruction.asm.toString().padEnd(asmPad, " ")}\t${instruction.bytecode}\n`;
-    }
-
-    return str;
 }
 
 function parseSourceMap(sourceMap: string) {
