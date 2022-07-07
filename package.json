@@ -1,4 +1,26 @@
 {
+  "name": "@playmint/lallafa",
+  "author": "Playmint",
+  "license": "CC0-1.0",
+  "version": "1.0.0",
+  "description": "Gas profiling tool for Ethereum smart contracts",
+  "homepage": "https://github.com/playmint/lallafa",
+  "repository": "github:playmint/lallafa",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "keywords": [
+    "ethereum",
+    "gas",
+    "debugging",
+    "tooling",
+    "smart-contracts"
+  ],
+  "files": [
+    "lib/index.*",
+    "src/index.ts",
+    "LICENSE.md",
+    "README.md"
+  ],
   "devDependencies": {
     "ts-node": "^10.8.1",
     "typescript": "^4.7.4"
