@@ -147,24 +147,29 @@ export function profile(trace: DebugTrace, isDeploymentTransaction: boolean, add
     type ContractCallInfo = {
         profile: ContractProfile | undefined;
         gas: number;
+        callPC: number;
     };
-    let currentCallProfile: ContractProfile | undefined = profiles[address];
-    let currentCallGas = 0;
-    let currentCallDepth = 1;
     let currentCall: ContractCallInfo = {
-
+        profile: profiles[address],
+        gas: 0,
+        callPC: -1
     };
     const callStack: ContractCallInfo[] = [];
-    const contractStack: (ContractProfile | undefined)[] = [];
 
     for (let i = 0; i < trace.structLogs.length; ++i) {
         const log = trace.structLogs[i];
 
+        const currentCallDepth = callStack.length + 1;
         if (currentCallDepth != log.depth) {
             if (log.depth > currentCallDepth) {
                 // keep track of nested calls
-                contractStack.push(currentCallProfile);
-                currentCallGas = 0;
+                currentCall.callPC = trace.structLogs[i - 1].pc;
+                callStack.push(currentCall);
+                currentCall = {
+                    profile: undefined,
+                    gas: 0,
+                    callPC: - 1
+                };
 
                 const previousLog = trace.structLogs[i - 1];
                 if (previousLog.stack) {
@@ -183,50 +188,57 @@ export function profile(trace: DebugTrace, isDeploymentTransaction: boolean, add
                         console.log("can't follow this call");
                     }
 
-                    contractStack.push(currentCallProfile);
-                    currentCallProfile = profiles[address];
-                }
-                else {
-                    contractStack.push(currentCallProfile);
-                    currentCallProfile = undefined;
+                    currentCall.profile = profiles[address];
                 }
             }
             else {
-                currentCallProfile = contractStack.pop();
-            }
+                if (currentCall.profile) {
+                    for (const call of callStack) {
+                        call.gas -= currentCall.gas;
 
-            currentCallDepth = log.depth;
+                        if (call.profile) {
+                            const instructionId = call.profile.pcToInstructionId[call.callPC];
+                            call.profile.instructionsProfile[instructionId].gas -= currentCall.gas;
+                            const sourceId = call.profile.sourceMap[instructionId].sourceId;
+                            const line = call.profile.instructionToSourceLine[instructionId];
+                            call.profile.sourcesProfile[sourceId].lines[line].gas -= currentCall.gas;
+                        }
+                    }
+                }
+
+                currentCall = callStack.pop()!;
+            }
         }
 
-        if (!currentCallProfile) {
+        if (!currentCall.profile) {
             continue;
         }
 
-        currentCallGas += log.gasCost;
+        currentCall.gas += log.gasCost;
 
-        if (currentCallProfile.pcToInstructionId[log.pc] === undefined) {
+        if (currentCall.profile.pcToInstructionId[log.pc] === undefined) {
             throw new Error(`couldn't find instruction for PC ${log.pc}`);
         }
-        const instructionId = currentCallProfile.pcToInstructionId[log.pc];
+        const instructionId = currentCall.profile.pcToInstructionId[log.pc];
 
-        if (log.op != currentCallProfile.instructionsProfile[instructionId].op) {
-            throw new Error(`op in debug trace ${log.op} not same as instruction found in bytecode ${currentCallProfile.instructionsProfile[instructionId].op}`);
+        if (log.op != currentCall.profile.instructionsProfile[instructionId].op) {
+            throw new Error(`op in debug trace ${log.op} not same as instruction found in bytecode ${currentCall.profile.instructionsProfile[instructionId].op}`);
         }
 
-        currentCallProfile.instructionsProfile[instructionId].gas += log.gasCost;
+        currentCall.profile.instructionsProfile[instructionId].gas += log.gasCost;
 
-        const sourceMapEntry = currentCallProfile.sourceMap[instructionId];
+        const sourceMapEntry = currentCall.profile.sourceMap[instructionId];
 
         // these are lazily created so we only output sources which contribute to gas usage for this txn
-        if (!currentCallProfile.sourcesProfile[sourceMapEntry.sourceId]) {
-            currentCallProfile.sourcesProfile[sourceMapEntry.sourceId] = {
-                name: currentCallProfile.sourcesById[sourceMapEntry.sourceId].name,
-                lines: currentCallProfile.sourcesById[sourceMapEntry.sourceId].lines.map((line) => { return { text: line, gas: 0 }; })
+        if (!currentCall.profile.sourcesProfile[sourceMapEntry.sourceId]) {
+            currentCall.profile.sourcesProfile[sourceMapEntry.sourceId] = {
+                name: currentCall.profile.sourcesById[sourceMapEntry.sourceId].name,
+                lines: currentCall.profile.sourcesById[sourceMapEntry.sourceId].lines.map((line) => { return { text: line, gas: 0 }; })
             };
         }
 
-        const line = currentCallProfile.instructionToSourceLine[instructionId];
-        currentCallProfile.sourcesProfile[sourceMapEntry.sourceId].lines[line].gas += log.gasCost;
+        const line = currentCall.profile.instructionToSourceLine[instructionId];
+        currentCall.profile.sourcesProfile[sourceMapEntry.sourceId].lines[line].gas += log.gasCost;
     }
 
     const result: Profile = {};

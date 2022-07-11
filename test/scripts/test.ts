@@ -81,10 +81,12 @@ async function main() {
         const contractAddresses = JSON.parse(fs.readFileSync("calltest_simple_debug_trace.txt").toString()).contractAddresses;
 
         const buildInfoA = await hre.artifacts.getBuildInfo("contracts/CallTest.sol:CallTestA");
-        if (!buildInfoA) {
-            throw new Error("couldn't find build info for CallTestA");
+        const buildInfoB = await hre.artifacts.getBuildInfo("contracts/CallTest.sol:CallTestB");
+        if (!buildInfoA || !buildInfoB) {
+            throw new Error("couldn't find build info for CallTest");
         }
         const outputA = buildInfoA.output.contracts["contracts/CallTest.sol"]["CallTestA"];
+        const outputB = buildInfoB.output.contracts["contracts/CallTest.sol"]["CallTestB"];
 
         const contractInfo: ContractInfoMap = {};
         contractInfo[contractAddresses.a] = {
@@ -102,6 +104,22 @@ async function main() {
                 sources: buildInfoA.output.sources
             },
             input: buildInfoA.input
+        };
+        contractInfo[contractAddresses.b] = {
+            output: {
+                bytecode: {
+                    bytecode: outputB.evm.bytecode.object,
+                    sourceMap: outputB.evm.bytecode.sourceMap,
+                    generatedSources: (outputB.evm.bytecode as any).generatedSources || []
+                },
+                deployedBytecode: {
+                    bytecode: outputB.evm.deployedBytecode.object,
+                    sourceMap: outputB.evm.deployedBytecode.sourceMap,
+                    generatedSources: (outputB.evm.deployedBytecode as any).generatedSources || []
+                },
+                sources: buildInfoB.output.sources
+            },
+            input: buildInfoB.input
         };
 
         let result = profile(
