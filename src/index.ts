@@ -129,54 +129,104 @@ export type Profile = {
 };
 
 export function profile(trace: DebugTrace, isDeploymentTransaction: boolean, address: string, contracts: ContractInfoMap): Profile {
-    const profiles: ContractProfiles = {};
-    const profile = createProfileForContract(contracts[address], isDeploymentTransaction);
-    profiles[address.toUpperCase()] = profile;
+    // all addresses should be upper case to avoid any case issues with comparing strings
+    address = address.substring(2).toUpperCase();
 
-    let currentDepth = 1;
+    // make contract info map ignore case
+    const contractsNcs: ContractInfoMap = {};
+    for (const address in contracts) {
+        contractsNcs[address.substring(2).toUpperCase()] = contracts[address];
+    }
+    contracts = contractsNcs;
+
+    // TODO check contracts[address] exists and throw if not
+
+    const profiles: ContractProfiles = {};
+    profiles[address] = createProfileForContract(contracts[address], isDeploymentTransaction);
+
+    type ContractCallInfo = {
+        profile: ContractProfile | undefined;
+        gas: number;
+    };
+    let currentCallProfile: ContractProfile | undefined = profiles[address];
+    let currentCallGas = 0;
+    let currentCallDepth = 1;
+    let currentCall: ContractCallInfo = {
+
+    };
+    const callStack: ContractCallInfo[] = [];
+    const contractStack: (ContractProfile | undefined)[] = [];
+
     for (let i = 0; i < trace.structLogs.length; ++i) {
         const log = trace.structLogs[i];
 
-        if (currentDepth != log.depth) {
-            if (log.depth > currentDepth) {
+        if (currentCallDepth != log.depth) {
+            if (log.depth > currentCallDepth) {
+                // keep track of nested calls
+                contractStack.push(currentCallProfile);
+                currentCallGas = 0;
+
                 const previousLog = trace.structLogs[i - 1];
                 if (previousLog.stack) {
                     // call/callcode/staticcall/delegatecall all put gas at the top of the stack,
                     // and then the address of the contract being called
-                    const address = "0x" + previousLog.stack[previousLog.stack.length - 2].substring(24).toUpperCase();
+                    // 31040
+                    const address = previousLog.stack[previousLog.stack.length - 2].substring(24).toUpperCase();
                     console.log("calling", address);
+                    if (contracts[address]) {
+                        console.log("can follow this call");
+                        if (!profiles[address]) {
+                            profiles[address] = createProfileForContract(contracts[address]);
+                        }
+                    }
+                    else {
+                        console.log("can't follow this call");
+                    }
+
+                    contractStack.push(currentCallProfile);
+                    currentCallProfile = profiles[address];
+                }
+                else {
+                    contractStack.push(currentCallProfile);
+                    currentCallProfile = undefined;
                 }
             }
+            else {
+                currentCallProfile = contractStack.pop();
+            }
 
-            currentDepth = log.depth;
+            currentCallDepth = log.depth;
         }
-        if (log.depth > 1) {
+
+        if (!currentCallProfile) {
             continue;
         }
 
-        if (profile.pcToInstructionId[log.pc] === undefined) {
+        currentCallGas += log.gasCost;
+
+        if (currentCallProfile.pcToInstructionId[log.pc] === undefined) {
             throw new Error(`couldn't find instruction for PC ${log.pc}`);
         }
-        const instructionId = profile.pcToInstructionId[log.pc];
+        const instructionId = currentCallProfile.pcToInstructionId[log.pc];
 
-        if (log.op != profile.instructionsProfile[instructionId].op) {
-            throw new Error(`op in debug trace ${log.op} not same as instruction found in bytecode ${profile.instructionsProfile[instructionId].op}`);
+        if (log.op != currentCallProfile.instructionsProfile[instructionId].op) {
+            throw new Error(`op in debug trace ${log.op} not same as instruction found in bytecode ${currentCallProfile.instructionsProfile[instructionId].op}`);
         }
 
-        profile.instructionsProfile[instructionId].gas += log.gasCost;
+        currentCallProfile.instructionsProfile[instructionId].gas += log.gasCost;
 
-        const sourceMapEntry = profile.sourceMap[instructionId];
+        const sourceMapEntry = currentCallProfile.sourceMap[instructionId];
 
         // these are lazily created so we only output sources which contribute to gas usage for this txn
-        if (!profile.sourcesProfile[sourceMapEntry.sourceId]) {
-            profile.sourcesProfile[sourceMapEntry.sourceId] = {
-                name: profile.sourcesById[sourceMapEntry.sourceId].name,
-                lines: profile.sourcesById[sourceMapEntry.sourceId].lines.map((line) => { return { text: line, gas: 0 }; })
+        if (!currentCallProfile.sourcesProfile[sourceMapEntry.sourceId]) {
+            currentCallProfile.sourcesProfile[sourceMapEntry.sourceId] = {
+                name: currentCallProfile.sourcesById[sourceMapEntry.sourceId].name,
+                lines: currentCallProfile.sourcesById[sourceMapEntry.sourceId].lines.map((line) => { return { text: line, gas: 0 }; })
             };
         }
 
-        const line = profile.instructionToSourceLine[instructionId];
-        profile.sourcesProfile[sourceMapEntry.sourceId].lines[line].gas += log.gasCost;
+        const line = currentCallProfile.instructionToSourceLine[instructionId];
+        currentCallProfile.sourcesProfile[sourceMapEntry.sourceId].lines[line].gas += log.gasCost;
     }
 
     const result: Profile = {};
