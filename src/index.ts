@@ -394,8 +394,15 @@ function createEmptyProfileForContract(contractInfo: ContractInfo, isDeployment:
     const instructions = parseBytecode(bytecode.bytecode, sourceMap.length);
 
     // generate human readable names for jumpdests
+
+    // keep a map of pc -> jumpdest name, so that when the jumpdest is pushed onto the stack prior
+    // to a jump instruction, it can be labelled with the correct name
     const jumpDestNames: { [pc: number]: string } = {};
+
+    // a function can contain multiple jumpdests, so we keep track of the count so we can give them
+    // unique names, e.g. func_name_uint256_uint256_1/2/3/4 etc
     const functionJumpDestCounts: { [sourceId: number]: { [functionSig: string]: number } } = {};
+
     for (let i = 0; i < instructions.length; ++i) {
         if (instructions[i].asm == "JUMPDEST") {
             const sourceMapEntry = sourceMap[i];
@@ -403,7 +410,9 @@ function createEmptyProfileForContract(contractInfo: ContractInfo, isDeployment:
             const rangeEnd = sourceMapEntry.rangeStart + sourceMapEntry.rangeLength - 1;
             const ast = sourcesById[sourceMapEntry.sourceId].ast;
 
-            // use function so we can be recursive
+            // use function so we can be recursive. When we find a node in the ast which corresponds
+            // to a source range which contains the instruction source range, recursively search the
+            // nodes children until we find the function node.
             function astFunctionSearch(ast: AstNode): AstNode | null {
                 let childNodes: AstNode[] = [];
                 if ("nodes" in ast) {
@@ -434,6 +443,7 @@ function createEmptyProfileForContract(contractInfo: ContractInfo, isDeployment:
             if (functionNode) {
                 let functionSig = "";
                 if (functionNode.nodeType == "FunctionDefinition") {
+                    // generate a jumpdest name format as function_name_arg1type_arg2type_etc
                     functionSig = `${functionNode.name}${functionNode.parameters.parameters.length > 0 ? `_${functionNode.parameters.parameters.map(param => param.typeName.name).join("_")}` : ""}`;
                 }
                 else if (functionNode.nodeType == "YulFunctionDefinition") {
@@ -469,6 +479,9 @@ function createEmptyProfileForContract(contractInfo: ContractInfo, isDeployment:
         if (instructions[i].asm == "JUMP" ||
             instructions[i].asm == "JUMPI") {
             if (instructions[i - 1].asm.startsWith("PUSH")) {
+                // split the instruction so we get the jumpdest value in hex that's being jumped to,
+                // this is the PC of the jumpdest, so we use the jumpDestNames map to convert this
+                // to a human readable name
                 const bytes = instructions[i - 1].asm.split(" ")[1];
                 const pc = parseInt(bytes.substring(2), 16);
                 if (jumpDestNames[pc]) {
