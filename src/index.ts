@@ -62,6 +62,7 @@ export type SourcesProfile = {
         lines: {
             gas: number;
             text: string;
+            instructions: InstructionProfile[]
         }[];
     }
 };
@@ -235,10 +236,11 @@ export function profile(trace: DebugTrace, isDeploymentTransaction: boolean, add
             if (!profile.sourcesProfile[instruction.sourceId]) {
                 profile.sourcesProfile[instruction.sourceId] = {
                     name: profile.sourcesById[instruction.sourceId].name,
-                    lines: profile.sourcesById[instruction.sourceId].lines.map((line) => { return { text: line, gas: 0 }; })
+                    lines: profile.sourcesById[instruction.sourceId].lines.map((line) => { return { text: line, gas: 0, instructions: [] }; })
                 };
             }
 
+            profile.sourcesProfile[instruction.sourceId].lines[instruction.sourceLine].instructions.push(instruction);
             profile.sourcesProfile[instruction.sourceId].lines[instruction.sourceLine].gas += instruction.gas;
         }
     }
