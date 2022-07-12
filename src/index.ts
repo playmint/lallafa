@@ -175,7 +175,6 @@ export function profile(trace: DebugTrace, isDeploymentTransaction: boolean, add
                 if (previousLog.stack) {
                     // call/callcode/staticcall/delegatecall all put gas at the top of the stack,
                     // and then the address of the contract being called
-                    // 31040
                     const address = previousLog.stack[previousLog.stack.length - 2].substring(24).toUpperCase();
                     console.log("calling", address);
                     if (contracts[address]) {
