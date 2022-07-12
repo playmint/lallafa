@@ -44,13 +44,17 @@ type GeneratedSource = {
     ast: any;
 };
 
-export type InstructionsProfile = {
+export type InstructionProfile = {
     gas: number;
     bytecode: string;
     asm: string;
     pc: number;
     op: string;
-}[];
+    sourceId: number;
+    sourceRangeStart: number;
+    sourceRangeLength: number;
+    sourceLine: number;
+};
 
 export type SourcesProfile = {
     [source: number]: {
@@ -102,16 +106,15 @@ type Jump = "in" | "out" | "-";
 
 type ContractProfile = {
     sourcesProfile: SourcesProfile;
-    instructionsProfile: InstructionsProfile;
+    instructionsProfile: InstructionProfile[];
     pcToInstructionId: { [pc: number]: number };
-    sourceMap: SourceMapEntry[];
     sourcesById: SourcesById;
-    instructionToSourceLine: number[];
 };
 
 type SourcesById = {
     [id: number]: {
         name: string;
+        content: string;
         lines: string[];
         ast: AstNode
     }
@@ -123,8 +126,9 @@ type ContractProfiles = {
 
 export type Profile = {
     [address: string]: {
-        instructionsProfile: InstructionsProfile;
+        instructionsProfile: InstructionProfile[];
         sourcesProfile: SourcesProfile;
+        sourcesById: SourcesById;
     }
 };
 
@@ -142,14 +146,16 @@ export function profile(trace: DebugTrace, isDeploymentTransaction: boolean, add
     // TODO check contracts[address] exists and throw if not
 
     const profiles: ContractProfiles = {};
-    profiles[address] = createProfileForContract(contracts[address], isDeploymentTransaction);
+    profiles[address] = createEmptyProfileForContract(contracts[address], isDeploymentTransaction);
 
     type ContractCallInfo = {
+        address: string;
         profile: ContractProfile | undefined;
         gas: number;
         callPC: number;
     };
     let currentCall: ContractCallInfo = {
+        address: address,
         profile: profiles[address],
         gas: 0,
         callPC: -1
@@ -166,6 +172,7 @@ export function profile(trace: DebugTrace, isDeploymentTransaction: boolean, add
                 currentCall.callPC = trace.structLogs[i - 1].pc;
                 callStack.push(currentCall);
                 currentCall = {
+                    address: "#unknown-address#",
                     profile: undefined,
                     gas: 0,
                     callPC: - 1
@@ -176,15 +183,12 @@ export function profile(trace: DebugTrace, isDeploymentTransaction: boolean, add
                     // call/callcode/staticcall/delegatecall all put gas at the top of the stack,
                     // and then the address of the contract being called
                     const address = previousLog.stack[previousLog.stack.length - 2].substring(24).toUpperCase();
-                    console.log("calling", address);
+                    currentCall.address = address;
+
                     if (contracts[address]) {
-                        console.log("can follow this call");
                         if (!profiles[address]) {
-                            profiles[address] = createProfileForContract(contracts[address]);
+                            profiles[address] = createEmptyProfileForContract(contracts[address]);
                         }
-                    }
-                    else {
-                        console.log("can't follow this call");
                     }
 
                     currentCall.profile = profiles[address];
@@ -198,9 +202,6 @@ export function profile(trace: DebugTrace, isDeploymentTransaction: boolean, add
                         if (call.profile) {
                             const instructionId = call.profile.pcToInstructionId[call.callPC];
                             call.profile.instructionsProfile[instructionId].gas -= currentCall.gas;
-                            const sourceId = call.profile.sourceMap[instructionId].sourceId;
-                            const line = call.profile.instructionToSourceLine[instructionId];
-                            call.profile.sourcesProfile[sourceId].lines[line].gas -= currentCall.gas;
                         }
                     }
                 }
@@ -216,35 +217,38 @@ export function profile(trace: DebugTrace, isDeploymentTransaction: boolean, add
         currentCall.gas += log.gasCost;
 
         if (currentCall.profile.pcToInstructionId[log.pc] === undefined) {
-            throw new Error(`couldn't find instruction for PC ${log.pc}`);
+            throw new Error(`${currentCall.address}: couldn't find instruction for PC ${log.pc}`);
         }
         const instructionId = currentCall.profile.pcToInstructionId[log.pc];
 
         if (log.op != currentCall.profile.instructionsProfile[instructionId].op) {
-            throw new Error(`op in debug trace ${log.op} not same as instruction found in bytecode ${currentCall.profile.instructionsProfile[instructionId].op}`);
+            throw new Error(`${currentCall.address}: op in debug trace ${log.op} not same as instruction found in bytecode ${currentCall.profile.instructionsProfile[instructionId].op}`);
         }
 
         currentCall.profile.instructionsProfile[instructionId].gas += log.gasCost;
+    }
 
-        const sourceMapEntry = currentCall.profile.sourceMap[instructionId];
+    for (const address in profiles) {
+        const profile = profiles[address];
+        for (const instruction of profile.instructionsProfile) {
+            // these are lazily created so we only output sources which contribute to gas usage for this txn
+            if (!profile.sourcesProfile[instruction.sourceId]) {
+                profile.sourcesProfile[instruction.sourceId] = {
+                    name: profile.sourcesById[instruction.sourceId].name,
+                    lines: profile.sourcesById[instruction.sourceId].lines.map((line) => { return { text: line, gas: 0 }; })
+                };
+            }
 
-        // these are lazily created so we only output sources which contribute to gas usage for this txn
-        if (!currentCall.profile.sourcesProfile[sourceMapEntry.sourceId]) {
-            currentCall.profile.sourcesProfile[sourceMapEntry.sourceId] = {
-                name: currentCall.profile.sourcesById[sourceMapEntry.sourceId].name,
-                lines: currentCall.profile.sourcesById[sourceMapEntry.sourceId].lines.map((line) => { return { text: line, gas: 0 }; })
-            };
+            profile.sourcesProfile[instruction.sourceId].lines[instruction.sourceLine].gas += instruction.gas;
         }
-
-        const line = currentCall.profile.instructionToSourceLine[instructionId];
-        currentCall.profile.sourcesProfile[sourceMapEntry.sourceId].lines[line].gas += log.gasCost;
     }
 
     const result: Profile = {};
     for (const address in profiles) {
         result[address] = {
             instructionsProfile: profiles[address].instructionsProfile,
-            sourcesProfile: profiles[address].sourcesProfile
+            sourcesProfile: profiles[address].sourcesProfile,
+            sourcesById: profiles[address].sourcesById
         };
     }
 
@@ -310,7 +314,7 @@ export function instructionsProfileToString(profile: Profile) {
     return str;
 }
 
-function createProfileForContract(contractInfo: ContractInfo, isDeployment: boolean = false): ContractProfile {
+function createEmptyProfileForContract(contractInfo: ContractInfo, isDeployment: boolean = false): ContractProfile {
     const bytecode = isDeployment ? contractInfo.output.bytecode : contractInfo.output.deployedBytecode;
 
     // source maps refer to source ids, so create a lookup of source ids to
@@ -320,6 +324,7 @@ function createProfileForContract(contractInfo: ContractInfo, isDeployment: bool
         const sourceId = contractInfo.output.sources[sourceName].id;
         sourcesById[sourceId] = {
             name: sourceName,
+            content: contractInfo.input.sources[sourceName].content,
             lines: contractInfo.input.sources[sourceName].content.split("\n"),
             ast: contractInfo.output.sources[sourceName].ast
         };
@@ -327,6 +332,7 @@ function createProfileForContract(contractInfo: ContractInfo, isDeployment: bool
     for (const generatedSource of bytecode.generatedSources) {
         sourcesById[generatedSource.id] = {
             name: generatedSource.name,
+            content: generatedSource.contents,
             lines: generatedSource.contents.split("\n"),
             ast: generatedSource.ast
         };
@@ -338,8 +344,8 @@ function createProfileForContract(contractInfo: ContractInfo, isDeployment: bool
     // generate human readable names for jumpdests
     const jumpDestNames: { [pc: number]: string } = {};
     const functionJumpDestCounts: { [sourceId: number]: { [functionSig: string]: number } } = {};
-    for (let i = 0; i < instructions.instructions.length; ++i) {
-        if (instructions.instructions[i].asm == "JUMPDEST") {
+    for (let i = 0; i < instructions.length; ++i) {
+        if (instructions[i].asm == "JUMPDEST") {
             const sourceMapEntry = sourceMap[i];
             const rangeStart = sourceMapEntry.rangeStart;
             const rangeEnd = sourceMapEntry.rangeStart + sourceMapEntry.rangeLength - 1;
@@ -397,9 +403,9 @@ function createProfileForContract(contractInfo: ContractInfo, isDeployment: bool
                     ++functionJumpDestCounts[sourceMapEntry.sourceId][functionSig];
 
                     const jumpDestName = `${functionSig}_${jumpDestCount}`;
-                    jumpDestNames[instructions.instructions[i].pc] = jumpDestName;
+                    jumpDestNames[instructions[i].pc] = jumpDestName;
 
-                    instructions.instructions[i].asm += ` [${jumpDestName}]`;
+                    instructions[i].asm += ` [${jumpDestName}]`;
                 }
             }
 
@@ -407,19 +413,19 @@ function createProfileForContract(contractInfo: ContractInfo, isDeployment: bool
     }
 
     // generate human readable names for jumps
-    for (let i = 0; i < instructions.instructions.length; ++i) {
-        if (instructions.instructions[i].asm == "JUMP" ||
-            instructions.instructions[i].asm == "JUMPI") {
-            if (instructions.instructions[i - 1].asm.startsWith("PUSH")) {
-                const bytes = instructions.instructions[i - 1].asm.split(" ")[1];
+    for (let i = 0; i < instructions.length; ++i) {
+        if (instructions[i].asm == "JUMP" ||
+            instructions[i].asm == "JUMPI") {
+            if (instructions[i - 1].asm.startsWith("PUSH")) {
+                const bytes = instructions[i - 1].asm.split(" ")[1];
                 const pc = parseInt(bytes.substring(2), 16);
                 if (jumpDestNames[pc]) {
-                    instructions.instructions[i - 1].asm += ` [${jumpDestNames[pc]}]`;
+                    instructions[i - 1].asm += ` [${jumpDestNames[pc]}]`;
                 }
-                instructions.instructions[i].asm += " [in]";
+                instructions[i].asm += " [in]";
             }
-            else if (instructions.instructions[i - 1].asm == "POP") {
-                instructions.instructions[i].asm += " [out]";
+            else if (instructions[i - 1].asm == "POP") {
+                instructions[i].asm += " [out]";
             }
         }
     }
@@ -448,27 +454,53 @@ function createProfileForContract(contractInfo: ContractInfo, isDeployment: bool
         instructionToSourceLine.push(line);
     }
 
-    const instructionsProfile: InstructionsProfile = [];
-    for (const instruction of instructions.instructions) {
+    const instructionsProfile: InstructionProfile[] = [];
+    for (let instructionId = 0; instructionId < instructions.length; ++instructionId) {
+        const instruction = instructions[instructionId];
+        const sourceMapEntry = sourceMap[instructionId];
+
+        const sourceLines = sourcesById[sourceMapEntry.sourceId].lines;
+        let totalChars = 0;
+        let line: number;
+        for (line = 0; line < sourceLines.length; ++line) {
+            totalChars += sourceLines[line].length + 1; // + 1 for the \n character which has been removed already
+            if (sourceMapEntry.rangeStart < totalChars) {
+                break;
+            }
+        }
+        if (line == sourceLines.length) {
+            console.warn(`source line for instruction ${instructionId}(${sourceMapEntry.sourceId}:${sourceMapEntry.rangeStart}:${sourceMapEntry.rangeLength}) not found`);
+            line = 0;
+        }
+
         instructionsProfile.push({
             bytecode: "0x" + instruction.bytecode,
             asm: instruction.asm,
             pc: instruction.pc,
             gas: 0,
-            op: instruction.op
+            op: instruction.op,
+            sourceId: sourceMapEntry.sourceId,
+            sourceRangeStart: sourceMapEntry.rangeStart,
+            sourceRangeLength: sourceMapEntry.rangeLength,
+            sourceLine: line
         });
     }
 
+    // sources are generated later from the instructions profile
     const sourcesProfile: SourcesProfile = {};
+
+    const pcToInstructionId = instructions.reduce<{ [pc: number]: number }>(
+        (pcToInstructionId, instruction, instructionId) => {
+            pcToInstructionId[instruction.pc] = instructionId;
+            return pcToInstructionId;
+        }, {});
 
     return {
         instructionsProfile,
         sourcesProfile,
-        pcToInstructionId: instructions.pcToInstructionId,
-        sourceMap,
-        sourcesById,
-        instructionToSourceLine
-    }
+        pcToInstructionId,
+        sourcesById
+    };
 }
 
 function parseSourceMap(sourceMap: string) {
@@ -510,13 +542,11 @@ function parseSourceMap(sourceMap: string) {
 
 function parseBytecode(bytecode: string, instructionCount: number) {
     const instructions: { bytecode: string, asm: string, pc: number, op: string }[] = [];
-    const pcToInstructionId: { [pc: number]: number } = {};
 
     let i = 0;
     let currentInstruction = 0;
     while (i < bytecode.length && currentInstruction < instructionCount) {
         const pc = i / 2;
-        pcToInstructionId[pc] = currentInstruction;
 
         let instructionBytecode = bytecode.substring(i, i + 2).toUpperCase();
         const opcode = parseInt(instructionBytecode, 16);
@@ -547,10 +577,7 @@ function parseBytecode(bytecode: string, instructionCount: number) {
         ++currentInstruction;
     }
 
-    return {
-        instructions,
-        pcToInstructionId
-    }
+    return instructions;
 }
 
 const opcodes: { [opcode: number]: string } = {
