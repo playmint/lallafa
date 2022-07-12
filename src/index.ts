@@ -57,8 +57,9 @@ export type InstructionProfile = {
 };
 
 export type SourcesProfile = {
-    [source: number]: {
+    [sourceId: number]: {
         name: string;
+        content: string;
         lines: {
             gas: number;
             text: string;
@@ -106,13 +107,12 @@ type SourceMapEntry = {
 type Jump = "in" | "out" | "-";
 
 type ContractProfile = {
-    sourcesProfile: SourcesProfile;
     instructionsProfile: InstructionProfile[];
     pcToInstructionId: { [pc: number]: number };
     sourcesById: SourcesById;
 };
 
-type SourcesById = {
+export type SourcesById = {
     [id: number]: {
         name: string;
         content: string;
@@ -129,7 +129,6 @@ export type Profile = {
     [address: string]: {
         instructionsProfile: InstructionProfile[];
         sourcesProfile: SourcesProfile;
-        sourcesById: SourcesById;
     }
 };
 
@@ -144,34 +143,57 @@ export function profile(trace: DebugTrace, isDeploymentTransaction: boolean, add
     }
     contracts = contractsNcs;
 
-    // TODO check contracts[address] exists and throw if not
+    // check at least the starting address is in the map
+    if (!contracts[address]) {
+        throw new Error(`${address} not found in contract info map`);
+    }
 
+    // if the originating contract calls any other contracts, we'll potentially be profiling
+    // multiple contracts, so these are stored in a map of contract profiles
     const profiles: ContractProfiles = {};
+
+    // create empty profile for originating address
     profiles[address] = createEmptyProfileForContract(contracts[address], isDeploymentTransaction);
 
+    // when a call to another contract occurs in a debug trace, the total gas cost is attributed to 
+    // the callsite. If the call body is also profiled then you end up with the gas of the call body 
+    // accounted for twice. So when generating the profile, it maintains a call stack in order to 
+    // remove the gas cost of a call from its parent call(s). If the profiler doesn't have enough 
+    // information to follow the call and profile its body, then the gas stays attributed to the 
+    // call site.
+    const callStack: ContractCallInfo[] = [];
     type ContractCallInfo = {
         address: string;
         profile: ContractProfile | undefined;
         gas: number;
+        // when a call is pushed onto the stack, this is set to the PC of the call instruction
         callPC: number;
     };
+
     let currentCall: ContractCallInfo = {
         address: address,
         profile: profiles[address],
         gas: 0,
         callPC: -1
     };
-    const callStack: ContractCallInfo[] = [];
 
     for (let i = 0; i < trace.structLogs.length; ++i) {
         const log = trace.structLogs[i];
 
+        // callstack size + 1 for current call
         const currentCallDepth = callStack.length + 1;
         if (currentCallDepth != log.depth) {
             if (log.depth > currentCallDepth) {
-                // keep track of nested calls
+                // making a nested call within this one
+
+                // keep track of the pc for the call instruction
                 currentCall.callPC = trace.structLogs[i - 1].pc;
+
+                // push current call onto the stack
                 callStack.push(currentCall);
+
+                // create new call, we don't currently know address or profile, we may not be able 
+                // to find them out
                 currentCall = {
                     address: "#unknown-address#",
                     profile: undefined,
@@ -179,14 +201,22 @@ export function profile(trace: DebugTrace, isDeploymentTransaction: boolean, add
                     callPC: - 1
                 };
 
+                // to find the address, look at the call instruction
                 const previousLog = trace.structLogs[i - 1];
+
+                // we need to have the stack in the debug trace to extract the address
                 if (previousLog.stack) {
-                    // call/callcode/staticcall/delegatecall all put gas at the top of the stack,
-                    // and then the address of the contract being called
+                    // -2 here is because call/callcode/staticcall/delegatecall all put gas at the 
+                    // top of the stack, and then the address of the contract being called.
+                    // Ignore the first 24 chars because the high 12 bytes are all zeroes, addresses
+                    // are 20 bytes.
                     const address = previousLog.stack[previousLog.stack.length - 2].substring(24).toUpperCase();
                     currentCall.address = address;
 
+                    // see if we have info in the contract info map for this address
                     if (contracts[address]) {
+                        // see if we already have a profile created for this address (we may do if 
+                        // contract A calls B which calls A etc)
                         if (!profiles[address]) {
                             profiles[address] = createEmptyProfileForContract(contracts[address]);
                         }
@@ -196,11 +226,14 @@ export function profile(trace: DebugTrace, isDeploymentTransaction: boolean, add
                 }
             }
             else {
+                // returning from a call
+
+                // if we were able to profile this call, then remove its gas cost from parent calls
                 if (currentCall.profile) {
                     for (const call of callStack) {
-                        call.gas -= currentCall.gas;
-
                         if (call.profile) {
+                            call.gas -= currentCall.gas;
+
                             const instructionId = call.profile.pcToInstructionId[call.callPC];
                             call.profile.instructionsProfile[instructionId].gas -= currentCall.gas;
                         }
@@ -229,87 +262,104 @@ export function profile(trace: DebugTrace, isDeploymentTransaction: boolean, add
         currentCall.profile.instructionsProfile[instructionId].gas += log.gasCost;
     }
 
+    const result: Profile = {};
     for (const address in profiles) {
         const profile = profiles[address];
+
+        // create sources profile from instructions profile
+        const sourcesProfile: SourcesProfile = {};
         for (const instruction of profile.instructionsProfile) {
-            // these are lazily created so we only output sources which contribute to gas usage for this txn
-            if (!profile.sourcesProfile[instruction.sourceId]) {
-                profile.sourcesProfile[instruction.sourceId] = {
+            // these are lazily created so we only output sources which contribute to gas usage for 
+            // this txn
+            if (!sourcesProfile[instruction.sourceId]) {
+                sourcesProfile[instruction.sourceId] = {
                     name: profile.sourcesById[instruction.sourceId].name,
+                    content: profile.sourcesById[instruction.sourceId].content,
                     lines: profile.sourcesById[instruction.sourceId].lines.map((line) => { return { text: line, gas: 0, instructions: [] }; })
                 };
             }
 
-            profile.sourcesProfile[instruction.sourceId].lines[instruction.sourceLine].instructions.push(instruction);
-            profile.sourcesProfile[instruction.sourceId].lines[instruction.sourceLine].gas += instruction.gas;
+            sourcesProfile[instruction.sourceId].lines[instruction.sourceLine].instructions.push(instruction);
+            sourcesProfile[instruction.sourceId].lines[instruction.sourceLine].gas += instruction.gas;
         }
-    }
 
-    const result: Profile = {};
-    for (const address in profiles) {
         result[address] = {
             instructionsProfile: profiles[address].instructionsProfile,
-            sourcesProfile: profiles[address].sourcesProfile,
-            sourcesById: profiles[address].sourcesById
+            sourcesProfile
         };
     }
 
     return result;
 }
 
+// example of how to format and present a sources profile in a readable way
 export function sourcesProfileToString(profile: Profile) {
-    let biggestGasNumber = 0;
+    // need to find the biggest gas number to calculate the gas column width
+    let biggestGasNumber = 100; // need at least 3 chars for column header "Gas"
+    let longestCodeLine = 0;
     for (const address in profile) {
         const sourcesProfile = profile[address].sourcesProfile;
         for (const sourceId in sourcesProfile) {
             biggestGasNumber = sourcesProfile[sourceId].lines.reduce((biggest, line) => Math.max(biggest, line.gas), biggestGasNumber);
-            for (const line of sourcesProfile[sourceId].lines) {
-                biggestGasNumber = Math.max(biggestGasNumber, line.gas);
-            }
+            longestCodeLine = sourcesProfile[sourceId].lines.reduce((longest, line) => Math.max(longest, line.text.length), longestCodeLine);
         }
     }
     const gasPad = Math.floor(Math.log10(biggestGasNumber)) + 1;
 
     let str = "";
     for (const address in profile) {
-        str += `// ${address}\n============================================\n`;
+        str += `// ${address}\n`;
+        str += `============================================\n`;
+
         const sourcesProfile = profile[address].sourcesProfile;
         for (const sourceId in sourcesProfile) {
             str += `\n// ${sourcesProfile[sourceId].name}\n\n`;
+            str += `${"Gas".padEnd(gasPad, " ")} |\n`;
+            str += `${"".padEnd(gasPad + longestCodeLine + 3, "-")}\n`;
             for (const line of sourcesProfile[sourceId].lines) {
-                str += `${line.gas.toString().padEnd(gasPad, " ")}\t${line.text}\n`;
+                str += `${line.gas.toString().padEnd(gasPad, " ")} | ${line.text}\n`;
             }
         }
+        str += "\n";
     }
 
     return str;
 }
 
+// example of how to format and present an instructions profile
 export function instructionsProfileToString(profile: Profile) {
+    // same as above, want to display in neat columns so need to know what size each column must be
     const biggestGasNumber = Object.values(profile).reduce((biggest, contractProfile) => {
         return Math.max(biggest, contractProfile.instructionsProfile.reduce(
             (biggest, instruction) => {
                 return Math.max(biggest, instruction.gas);
             }, biggest));
-    }, 0);
+    }, 100); // 100 so we have at least 3 chars for the "Gas" header
     const gasPad = Math.floor(Math.log10(biggestGasNumber)) + 1;
 
     const biggestPc = Object.values(profile).reduce((biggest, contractProfile) => {
         return Math.max(biggest, contractProfile.instructionsProfile[contractProfile.instructionsProfile.length - 1].pc);
-    }, 0);
+    }, 16); // 16 so we have at least 2 chars for the "PC" header
     const pcPad = Math.floor(Math.log(biggestPc) / Math.log(16)) + 1;
 
     const asmPad = Object.values(profile).reduce((biggest, contractProfile) => {
         return Math.max(biggest, contractProfile.instructionsProfile.reduce(
             (longestAsmStr, instruction) => Math.max(longestAsmStr, instruction.asm.length), biggest));
-    }, 0);
+    }, 3); // at least 3 for "Asm" header
+
+    const bytecodePad = Object.values(profile).reduce((biggest, contractProfile) => {
+        return Math.max(biggest, contractProfile.instructionsProfile.reduce(
+            (longestBytecode, instruction) => Math.max(longestBytecode, instruction.bytecode.length), biggest));
+    }, 8); // at least 8 for "Bytecode" header
 
     let str = "";
     for (const address in profile) {
         str += `// ${address}\n============================================\n\n`;
         const instructionsProfile = profile[address].instructionsProfile;
+        str += `${"Gas".padEnd(gasPad, " ")} | ${"PC".padEnd(pcPad, " ")} | ${"Asm".padEnd(asmPad, " ")} | Bytecode\n`;
+        str += `${"".padEnd(gasPad + pcPad + asmPad + bytecodePad + 9, "-")}\n`;
         for (const instruction of instructionsProfile) {
-            str += `${instruction.gas.toString().padEnd(gasPad, " ")}\t${instruction.pc.toString(16).toUpperCase().padEnd(pcPad, " ")}\t${instruction.asm.toString().padEnd(asmPad, " ")}\t${instruction.bytecode}\n`;
+            str += `${instruction.gas.toString().padEnd(gasPad, " ")} | ${instruction.pc.toString(16).toUpperCase().padEnd(pcPad, " ")} | ${instruction.asm.toString().padEnd(asmPad, " ")} | ${instruction.bytecode}\n`;
         }
     }
 
@@ -488,9 +538,6 @@ function createEmptyProfileForContract(contractInfo: ContractInfo, isDeployment:
         });
     }
 
-    // sources are generated later from the instructions profile
-    const sourcesProfile: SourcesProfile = {};
-
     const pcToInstructionId = instructions.reduce<{ [pc: number]: number }>(
         (pcToInstructionId, instruction, instructionId) => {
             pcToInstructionId[instruction.pc] = instructionId;
@@ -499,7 +546,6 @@ function createEmptyProfileForContract(contractInfo: ContractInfo, isDeployment:
 
     return {
         instructionsProfile,
-        sourcesProfile,
         pcToInstructionId,
         sourcesById
     };
