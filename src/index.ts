@@ -495,35 +495,13 @@ function createEmptyProfileForContract(contractInfo: ContractInfo, isDeployment:
         }
     }
 
-    // each instruction in the source map will have a file offset, so use this
-    // to figure out the actual line number in each file that the instruction
-    // corresponds to. Cache this as may execute the same instruction many times
-    const instructionToSourceLine: number[] = [];
-    for (let instructionId = 0; instructionId < sourceMap.length; ++instructionId) {
-        const sourceMapEntry = sourceMap[instructionId];
-        const offset = sourceMapEntry.rangeStart;
-        const lines = sourcesById[sourceMapEntry.sourceId].lines;
-        let totalChars = 0;
-        let line: number;
-        for (line = 0; line < lines.length; ++line) {
-            totalChars += lines[line].length + 1; // + 1 for the \n character which has been removed already
-            if (offset < totalChars) {
-                break;
-            }
-        }
-        if (line == lines.length) {
-            console.warn(`source line for instruction ${instructionId}(${sourceMapEntry.sourceId}:${sourceMapEntry.rangeStart}:${sourceMapEntry.rangeLength}) not found`);
-            line = 0;
-        }
-
-        instructionToSourceLine.push(line);
-    }
-
     const instructionsProfile: InstructionProfile[] = [];
     for (let instructionId = 0; instructionId < instructions.length; ++instructionId) {
         const instruction = instructions[instructionId];
         const sourceMapEntry = sourceMap[instructionId];
 
+        // figure out which line of the source code this range lies on (sometimes a source range 
+        // spans multiple lines so we use the first line in the range)
         const sourceLines = sourcesById[sourceMapEntry.sourceId].lines;
         let totalChars = 0;
         let line: number;
@@ -565,6 +543,8 @@ function createEmptyProfileForContract(contractInfo: ContractInfo, isDeployment:
 }
 
 function parseSourceMap(sourceMap: string) {
+    // more info on source maps and how to parse them here:
+    // https://docs.soliditylang.org/en/latest/internals/source_mappings.html
     const entries: SourceMapEntry[] = [];
     const entry: SourceMapEntry = {
         rangeStart: -1,
@@ -595,6 +575,8 @@ function parseSourceMap(sourceMap: string) {
             }
         }
 
+        // each source map entry is essentially a delta against the previous one, so here using
+        // { ...entry } as an easy way to clone 'entry' as 'entry' will be reused
         entries.push({ ...entry });
     }
 
@@ -604,9 +586,7 @@ function parseSourceMap(sourceMap: string) {
 function parseBytecode(bytecode: string, instructionCount: number) {
     const instructions: { bytecode: string, asm: string, pc: number, op: string }[] = [];
 
-    let i = 0;
-    let currentInstruction = 0;
-    while (i < bytecode.length && currentInstruction < instructionCount) {
+    for (let i = 0; i < bytecode.length && instructions.length < instructionCount; i += 2) {
         const pc = i / 2;
 
         let instructionBytecode = bytecode.substring(i, i + 2).toUpperCase();
@@ -619,9 +599,12 @@ function parseBytecode(bytecode: string, instructionCount: number) {
             const byteCount = opcode - 0x5F;
             let bytes = bytecode.substring(i + 2, i + 2 + (byteCount * 2)).toUpperCase();
             instructionBytecode += bytes;
+
+            // remove leading zeroes of the bytes being pushed
             while (bytes.length > 1 && bytes.startsWith("0")) {
                 bytes = bytes.substring(1);
             }
+
             asm += " 0x" + bytes;
 
             i += (byteCount * 2);
@@ -633,9 +616,6 @@ function parseBytecode(bytecode: string, instructionCount: number) {
             pc,
             op
         });
-
-        i += 2;
-        ++currentInstruction;
     }
 
     return instructions;
