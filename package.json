@@ -13,7 +13,8 @@
     "gas",
     "debugging",
     "tooling",
-    "smart-contracts"
+    "smart-contracts",
+    "evm"
   ],
   "files": [
     "lib/index.*",
