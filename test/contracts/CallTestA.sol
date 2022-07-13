@@ -1,6 +1,8 @@
 //SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.0;
 
+import "./CallTestB.sol";
+
 contract CallTestA {
     CallTestB public _b;
     uint256 _value;
@@ -19,22 +21,5 @@ contract CallTestA {
 
     function complex2(uint256 value) external {
         _value = value;
-    }
-}
-
-contract CallTestB {
-    CallTestA public _a;
-    uint256 _value;
-
-    function setA(CallTestA a) external {
-        _a = a;
-    }
-
-    function simple(uint256 value) public {
-        _value = value;
-    }
-
-    function complex(uint256 value) public {
-        _a.complex2(value);
     }
 }

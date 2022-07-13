@@ -3,3 +3,4 @@ test/artifacts
 test/cache
 test/typechain-types
 test/lib
+test/output
