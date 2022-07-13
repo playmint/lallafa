@@ -46,25 +46,65 @@ declare type GeneratedSource = {
     contents: string;
     ast: any;
 };
-export declare type InstructionsProfile = {
+export declare type InstructionProfile = {
     gas: number;
     bytecode: string;
     asm: string;
     pc: number;
     op: string;
-}[];
+    sourceId: number;
+    sourceRangeStart: number;
+    sourceRangeLength: number;
+    sourceLine: number;
+};
 export declare type SourcesProfile = {
-    [source: number]: {
+    [sourceId: number]: {
         name: string;
+        content: string;
         lines: {
             gas: number;
             text: string;
+            instructions: InstructionProfile[];
         }[];
+    };
+};
+declare type AstNode = {
+    src: string;
+} & ({
+    nodeType: "SourceUnit";
+    nodes: AstNode[];
+} | {
+    nodeType: "FunctionDefinition";
+    name: string;
+    parameters: {
+        nodeType: "ParameterList";
+        parameters: AstFunctionParameter[];
+    };
+    nodes: AstNode[];
+} | {
+    nodeType: "YulBlock";
+    statements: AstNode[];
+} | {
+    nodeType: "YulFunctionDefinition";
+    name: string;
+});
+declare type AstFunctionParameter = {
+    nodeType: "VariableDeclaration";
+    typeName: {
+        name: string;
+    };
+};
+export declare type SourcesById = {
+    [id: number]: {
+        name: string;
+        content: string;
+        lines: string[];
+        ast: AstNode;
     };
 };
 export declare type Profile = {
     [address: string]: {
-        instructionsProfile: InstructionsProfile;
+        instructionsProfile: InstructionProfile[];
         sourcesProfile: SourcesProfile;
     };
 };
