@@ -5,13 +5,33 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "type": "pwa-node",
+            "type": "node",
             "request": "launch",
-            "name": "Run Test (hardhat)",
+            "name": "Profile Storage",
             "program": "node_modules/hardhat/internal/cli/cli.js",
             "args": [
                 "run",
-                "scripts/test.ts"
+                "scripts/profileStorage.ts"
+            ]
+        },
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "Profile CallTest",
+            "program": "node_modules/hardhat/internal/cli/cli.js",
+            "args": [
+                "run",
+                "scripts/profileCallTest.ts"
+            ]
+        },
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "Profile Proxy",
+            "program": "node_modules/hardhat/internal/cli/cli.js",
+            "args": [
+                "run",
+                "scripts/profileProxy.ts"
             ]
         }
     ]
