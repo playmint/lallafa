@@ -64,14 +64,21 @@ type GeneratedSource = {
 };
 
 export type InstructionProfile = {
+    // gas spent
     gas: number;
+    // bytecode hex string 
     bytecode: string;
+    // op, arg if any, jumpdest name if relevant
     asm: string;
+    // program counter
     pc: number;
+    // opcode as string, e.g. ISZERO, PUSH1, etc
     op: string;
+    // id of source this instruction was generated from
     sourceId: number;
     sourceRangeStart: number;
     sourceRangeLength: number;
+    // line of code where this source range starts (0 being the first line)
     sourceLine: number;
 };
 
@@ -80,8 +87,10 @@ export type SourcesProfile = {
         name: string;
         content: string;
         lines: {
+            // gas spent
             gas: number;
             text: string;
+            // instructions generated from this line of code
             instructions: InstructionProfile[]
         }[];
     }
