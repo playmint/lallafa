@@ -33,6 +33,16 @@
                 "run",
                 "scripts/profileProxy.ts"
             ]
+        },
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "Compile",
+            "program": "node_modules/hardhat/internal/cli/cli.js",
+            "args": [
+                "run",
+                "scripts/compile.ts"
+            ]
         }
     ]
 }

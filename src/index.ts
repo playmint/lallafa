@@ -20,7 +20,10 @@ export type ContractInfoMap = {
 
 export type ContractInfo = {
     input: CompilerInput;
-    output: CompilerOutput;
+    // if output is omitted, Lallafa will attempt to compile the contract from input. If you do this
+    // then solcVersion needs to be defined
+    output?: CompilerOutput;
+    solcVersion?: string;
     sourceName: string;
     contractName: string;
 };
@@ -160,7 +163,7 @@ export type Profile = {
     }
 };
 
-export function profile(trace: DebugTrace, isDeploymentTransaction: boolean, address: string, contracts: ContractInfoMap): Profile {
+export async function profile(trace: DebugTrace, isDeploymentTransaction: boolean, address: string, contracts: ContractInfoMap): Promise<Profile> {
     // all addresses should be upper case to avoid any case issues with comparing strings
     address = address.substring(2).toUpperCase();
 
@@ -174,6 +177,47 @@ export function profile(trace: DebugTrace, isDeploymentTransaction: boolean, add
     // check at least the starting address is in the map
     if (!contracts[address]) {
         throw new Error(`${address} not found in contract info map`);
+    }
+
+    // see if any contracts need compiling
+    const toCompile: { [version: string]: Set<CompilerInput> } = {};
+    for (const address in contracts) {
+        const contract = contracts[address];
+        if (!contract.output) {
+            if (!contract.solcVersion) {
+                throw new Error(`${address} does not define output or solcVersion`);
+            }
+            if (!toCompile[contract.solcVersion]) {
+                toCompile[contract.solcVersion] = new Set<CompilerInput>();
+            }
+            toCompile[contract.solcVersion].add(contract.input);
+        }
+    }
+    if (Object.values(toCompile).length > 0) {
+        // const url = 'https://binaries.soliditylang.org/bin/soljson-' + versionString + '.js';
+        // thing = json.parse(await get("https://binaries.soliditylang.org/bin/list.json"));
+
+        const solcJs = await import("solc");
+        const compilerOutput: { [version: string]: Map<CompilerInput, CompilerOutput> } = {};
+
+        for (const solcVersion in toCompile) {
+            const solc = await new Promise((resolve, reject) => {
+                solcJs.loadRemoteVersion("v" + solcVersion, (err, solc) => {
+                    if (err) {
+                        reject(err);
+                    }
+                    else {
+                        resolve(solc);
+                    }
+                });
+            }) as any;
+
+            compilerOutput[solcVersion] = new Map<CompilerInput, CompilerOutput>();
+            for (const input of toCompile[solcVersion].values()) {
+                const output = JSON.parse(solc.compile(JSON.stringify(input))) as CompilerOutput;
+                compilerOutput[solcVersion].set(input, output);
+            }
+        }
     }
 
     // if the originating contract calls any other contracts, we'll potentially be profiling
@@ -416,19 +460,19 @@ export function instructionsProfileToString(profile: Profile) {
 }
 
 function createEmptyProfileForContract(contractInfo: ContractInfo, isDeployment: boolean = false): ContractProfile {
-    const outputContract = contractInfo.output.contracts[contractInfo.sourceName][contractInfo.contractName];
+    const outputContract = contractInfo.output!.contracts[contractInfo.sourceName][contractInfo.contractName];
     const bytecode = isDeployment ? outputContract.evm.bytecode : outputContract.evm.deployedBytecode;
 
     // source maps refer to source ids, so create a lookup of source ids to
     // sources, both generated and non-generated
     const sourcesById: SourcesById = {};
-    for (const sourceName in contractInfo.output.sources) {
-        const sourceId = contractInfo.output.sources[sourceName].id;
+    for (const sourceName in contractInfo.output!.sources) {
+        const sourceId = contractInfo.output!.sources[sourceName].id;
         sourcesById[sourceId] = {
             name: sourceName,
             content: contractInfo.input.sources[sourceName].content,
             lines: contractInfo.input.sources[sourceName].content.split("\n"),
-            ast: contractInfo.output.sources[sourceName].ast
+            ast: contractInfo.output!.sources[sourceName].ast
         };
     }
     if (bytecode.generatedSources) {
