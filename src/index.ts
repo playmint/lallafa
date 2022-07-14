@@ -19,22 +19,41 @@ export type ContractInfoMap = {
 };
 
 export type ContractInfo = {
+    input: CompilerInput;
     output: CompilerOutput;
-    input: {
-        sources: { [name: string]: { content: string } }
+    sourceName: string;
+    contractName: string;
+};
+
+export type CompilerInput = {
+    sources: {
+        [name: string]: { content: string }
     };
 };
 
 export type CompilerOutput = {
-    bytecode: ContractBytecode;
-    deployedBytecode: ContractBytecode;
-    sources: { [source: string]: { id: number, ast: any } };
+    contracts: {
+        [sourceName: string]: {
+            [contractName: string]: {
+                evm: {
+                    bytecode: CompilerOutputBytecode;
+                    deployedBytecode: CompilerOutputBytecode;
+                };
+            };
+        };
+    };
+    sources: {
+        [source: string]: {
+            id: number;
+            ast: any;
+        }
+    };
 };
 
-export type ContractBytecode = {
-    bytecode: string;
+export type CompilerOutputBytecode = {
+    object: string;
     sourceMap: string;
-    generatedSources: GeneratedSource[];
+    generatedSources?: GeneratedSource[];
 };
 
 type GeneratedSource = {
@@ -388,7 +407,8 @@ export function instructionsProfileToString(profile: Profile) {
 }
 
 function createEmptyProfileForContract(contractInfo: ContractInfo, isDeployment: boolean = false): ContractProfile {
-    const bytecode = isDeployment ? contractInfo.output.bytecode : contractInfo.output.deployedBytecode;
+    const outputContract = contractInfo.output.contracts[contractInfo.sourceName][contractInfo.contractName];
+    const bytecode = isDeployment ? outputContract.evm.bytecode : outputContract.evm.deployedBytecode;
 
     // source maps refer to source ids, so create a lookup of source ids to
     // sources, both generated and non-generated
@@ -402,17 +422,19 @@ function createEmptyProfileForContract(contractInfo: ContractInfo, isDeployment:
             ast: contractInfo.output.sources[sourceName].ast
         };
     }
-    for (const generatedSource of bytecode.generatedSources) {
-        sourcesById[generatedSource.id] = {
-            name: generatedSource.name,
-            content: generatedSource.contents,
-            lines: generatedSource.contents.split("\n"),
-            ast: generatedSource.ast
-        };
+    if (bytecode.generatedSources) {
+        for (const generatedSource of bytecode.generatedSources) {
+            sourcesById[generatedSource.id] = {
+                name: generatedSource.name,
+                content: generatedSource.contents,
+                lines: generatedSource.contents.split("\n"),
+                ast: generatedSource.ast
+            };
+        }
     }
 
     const sourceMap = parseSourceMap(bytecode.sourceMap);
-    const instructions = parseBytecode(bytecode.bytecode, sourceMap.length);
+    const instructions = parseBytecode(bytecode.object, sourceMap.length);
 
     // generate human readable names for jumpdests
 

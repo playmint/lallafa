@@ -18,41 +18,19 @@ async function main() {
     if (!buildInfoA || !buildInfoB) {
         throw new Error("couldn't find build info for CallTest");
     }
-    const outputA = buildInfoA.output.contracts["contracts/CallTestA.sol"]["CallTestA"];
-    const outputB = buildInfoB.output.contracts["contracts/CallTestB.sol"]["CallTestB"];
 
     const contractInfo: ContractInfoMap = {};
     contractInfo[a.address] = {
-        output: {
-            bytecode: {
-                bytecode: outputA.evm.bytecode.object,
-                sourceMap: outputA.evm.bytecode.sourceMap,
-                generatedSources: (outputA.evm.bytecode as any).generatedSources || []
-            },
-            deployedBytecode: {
-                bytecode: outputA.evm.deployedBytecode.object,
-                sourceMap: outputA.evm.deployedBytecode.sourceMap,
-                generatedSources: (outputA.evm.deployedBytecode as any).generatedSources || []
-            },
-            sources: buildInfoA.output.sources
-        },
-        input: buildInfoA.input
+        input: buildInfoA.input,
+        output: buildInfoA.output,
+        sourceName: "contracts/CallTestA.sol",
+        contractName: "CallTestA"
     };
     contractInfo[b.address] = {
-        output: {
-            bytecode: {
-                bytecode: outputB.evm.bytecode.object,
-                sourceMap: outputB.evm.bytecode.sourceMap,
-                generatedSources: (outputB.evm.bytecode as any).generatedSources || []
-            },
-            deployedBytecode: {
-                bytecode: outputB.evm.deployedBytecode.object,
-                sourceMap: outputB.evm.deployedBytecode.sourceMap,
-                generatedSources: (outputB.evm.deployedBytecode as any).generatedSources || []
-            },
-            sources: buildInfoB.output.sources
-        },
-        input: buildInfoB.input
+        input: buildInfoB.input,
+        output: buildInfoB.output,
+        sourceName: "contracts/CallTestB.sol",
+        contractName: "CallTestB"
     };
 
     if (!fs.existsSync("output")) {

@@ -13,24 +13,13 @@ async function main() {
     if (!buildInfo) {
         throw new Error("couldn't find build info");
     }
-    const output = buildInfo.output.contracts["contracts/Storage.sol"]["Storage"];
 
     const contracts: ContractInfoMap = {}
     contracts[storage.address] = {
-        output: {
-            bytecode: {
-                bytecode: output.evm.bytecode.object,
-                sourceMap: output.evm.bytecode.sourceMap,
-                generatedSources: (output.evm.bytecode as any).generatedSources || []
-            },
-            deployedBytecode: {
-                bytecode: output.evm.deployedBytecode.object,
-                sourceMap: output.evm.deployedBytecode.sourceMap,
-                generatedSources: (output.evm.deployedBytecode as any).generatedSources || []
-            },
-            sources: buildInfo.output.sources
-        },
-        input: buildInfo.input
+        input: buildInfo.input,
+        output: buildInfo.output,
+        sourceName: "contracts/Storage.sol",
+        contractName: "Storage"
     };
 
     if (!fs.existsSync("output")) {

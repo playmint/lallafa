@@ -20,41 +20,19 @@ async function main() {
     if (!proxyBuildInfo || !implBuildInfo) {
         throw new Error("couldn't find build info");
     }
-    const proxyOutput = proxyBuildInfo.output.contracts["contracts/Proxy.sol"]["TestProxy"];
-    const implOutput = implBuildInfo.output.contracts["contracts/ProxyImplementation.sol"]["TestProxyImplementation"];
 
     const contracts: ContractInfoMap = {}
     contracts[proxy.address] = {
-        output: {
-            bytecode: {
-                bytecode: proxyOutput.evm.bytecode.object,
-                sourceMap: proxyOutput.evm.bytecode.sourceMap,
-                generatedSources: (proxyOutput.evm.bytecode as any).generatedSources || []
-            },
-            deployedBytecode: {
-                bytecode: proxyOutput.evm.deployedBytecode.object,
-                sourceMap: proxyOutput.evm.deployedBytecode.sourceMap,
-                generatedSources: (proxyOutput.evm.deployedBytecode as any).generatedSources || []
-            },
-            sources: proxyBuildInfo.output.sources
-        },
-        input: proxyBuildInfo.input
+        input: proxyBuildInfo.input,
+        output: proxyBuildInfo.output,
+        sourceName: "contracts/Proxy.sol",
+        contractName: "TestProxy"
     };
     contracts[impl.address] = {
-        output: {
-            bytecode: {
-                bytecode: implOutput.evm.bytecode.object,
-                sourceMap: implOutput.evm.bytecode.sourceMap,
-                generatedSources: (implOutput.evm.bytecode as any).generatedSources || []
-            },
-            deployedBytecode: {
-                bytecode: implOutput.evm.deployedBytecode.object,
-                sourceMap: implOutput.evm.deployedBytecode.sourceMap,
-                generatedSources: (implOutput.evm.deployedBytecode as any).generatedSources || []
-            },
-            sources: implBuildInfo.output.sources
-        },
-        input: implBuildInfo.input
+        input: implBuildInfo.input,
+        output: implBuildInfo.output,
+        sourceName: "contracts/ProxyImplementation.sol",
+        contractName: "TestProxyImplementation"
     };
 
     if (!fs.existsSync("output")) {
