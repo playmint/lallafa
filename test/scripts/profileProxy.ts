@@ -57,6 +57,10 @@ async function main() {
         input: implBuildInfo.input
     };
 
+    if (!fs.existsSync("output")) {
+        fs.mkdirSync("output");
+    }
+
     {
         const debugTrace = await hre.ethers.provider.send("debug_traceTransaction",
             [(await proxy.deployTransaction.wait()).transactionHash, {

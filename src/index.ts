@@ -155,6 +155,27 @@ export function profile(trace: DebugTrace, isDeploymentTransaction: boolean, add
     // create empty profile for originating address
     profiles[address] = createEmptyProfileForContract(contracts[address], isDeploymentTransaction);
 
+    // calls don't contain the true gas cost at this point, it's the amount of gas sent to carry out
+    // the call. So here preprocess the debug trace to calculate the actual gas spent at each call
+    // by using gas before/after
+    const callLogStack: DebugTraceLog[] = [];
+    for (let i = 0; i < trace.structLogs.length; ++i) {
+        const log = trace.structLogs[i];
+
+        // stack size + 1 for current call
+        const currentCallDepth = callLogStack.length + 1;
+
+        if (log.depth != currentCallDepth) {
+            if (log.depth > currentCallDepth) {
+                callLogStack.push(trace.structLogs[i - 1]);
+            }
+            else {
+                const callLog = callLogStack.pop()!;
+                callLog.gasCost = callLog.gas - log.gas;
+            }
+        }
+    }
+
     // when a call to another contract occurs in a debug trace, the total gas cost is attributed to 
     // the callsite. If the call body is also profiled then you end up with the gas of the call body 
     // accounted for twice. So when generating the profile, it maintains a call stack in order to 
