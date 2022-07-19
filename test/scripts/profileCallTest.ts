@@ -47,7 +47,7 @@ async function main() {
                 "disableStorage": true
             }]);
 
-        const result = profile(
+        const result = await profile(
             debugTrace,
             false, // isDeployment
             a.address,
@@ -67,7 +67,7 @@ async function main() {
                 "disableStorage": true
             }]);
 
-        const result = profile(
+        const result = await profile(
             debugTrace,
             false, // isDeployment
             a.address,

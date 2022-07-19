@@ -34,7 +34,7 @@ async function main() {
                 "disableStorage": true
             }]);
 
-        const result = profile(
+        const result = await profile(
             debugTrace,
             true, // isDeployment
             storage.address,
@@ -52,15 +52,12 @@ async function main() {
                 "disableStorage": true
             }]);
 
-        const result = profile(
+        const result = await profile(
             debugTrace,
             false, // isDeployment
             storage.address,
             contracts);
 
-        if (!fs.existsSync("output")) {
-            fs.mkdirSync("output");
-        }
         fs.writeFileSync("output/storage_setValue_sources_profile.txt", sourcesProfileToString(result));
         fs.writeFileSync("output/storage_setValue_instruction_profile.txt", instructionsProfileToString(result));
     }

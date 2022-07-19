@@ -37,11 +37,11 @@
         {
             "type": "node",
             "request": "launch",
-            "name": "Compile",
+            "name": "Compile Input",
             "program": "node_modules/hardhat/internal/cli/cli.js",
             "args": [
                 "run",
-                "scripts/compile.ts"
+                "scripts/compileInput.ts"
             ]
         }
     ]

@@ -17,7 +17,8 @@ export declare type ContractInfoMap = {
 };
 export declare type ContractInfo = {
     input: CompilerInput;
-    output: CompilerOutput;
+    output?: CompilerOutput;
+    solcVersion?: string;
     sourceName: string;
     contractName: string;
 };
@@ -32,9 +33,9 @@ export declare type CompilerOutput = {
     contracts: {
         [sourceName: string]: {
             [contractName: string]: {
-                evm: {
-                    bytecode: CompilerOutputBytecode;
-                    deployedBytecode: CompilerOutputBytecode;
+                evm?: {
+                    bytecode?: CompilerOutputBytecode;
+                    deployedBytecode?: CompilerOutputBytecode;
                 };
             };
         };
@@ -42,7 +43,7 @@ export declare type CompilerOutput = {
     sources: {
         [source: string]: {
             id: number;
-            ast: any;
+            ast?: any;
         };
     };
 };
@@ -119,8 +120,7 @@ export declare type Profile = {
         sourcesProfile: SourcesProfile;
     };
 };
-export declare function compile(input: any): any;
-export declare function profile(trace: DebugTrace, isDeploymentTransaction: boolean, address: string, contracts: ContractInfoMap): Profile;
+export declare function profile(trace: DebugTrace, isDeploymentTransaction: boolean, address: string, contracts: ContractInfoMap): Promise<Profile>;
 export declare function sourcesProfileToString(profile: Profile): string;
 export declare function instructionsProfileToString(profile: Profile): string;
 export {};

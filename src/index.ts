@@ -38,9 +38,9 @@ export type CompilerOutput = {
     contracts: {
         [sourceName: string]: {
             [contractName: string]: {
-                evm: {
-                    bytecode: CompilerOutputBytecode;
-                    deployedBytecode: CompilerOutputBytecode;
+                evm?: {
+                    bytecode?: CompilerOutputBytecode;
+                    deployedBytecode?: CompilerOutputBytecode;
                 };
             };
         };
@@ -48,7 +48,7 @@ export type CompilerOutput = {
     sources: {
         [source: string]: {
             id: number;
-            ast: any;
+            ast?: any;
         }
     };
 };
@@ -194,9 +194,6 @@ export async function profile(trace: DebugTrace, isDeploymentTransaction: boolea
         }
     }
     if (Object.values(toCompile).length > 0) {
-        // const url = 'https://binaries.soliditylang.org/bin/soljson-' + versionString + '.js';
-        // thing = json.parse(await get("https://binaries.soliditylang.org/bin/list.json"));
-
         const solcJs = await import("solc");
         const compilerOutput: { [version: string]: Map<CompilerInput, CompilerOutput> } = {};
 
@@ -216,6 +213,13 @@ export async function profile(trace: DebugTrace, isDeploymentTransaction: boolea
             for (const input of toCompile[solcVersion].values()) {
                 const output = JSON.parse(solc.compile(JSON.stringify(input))) as CompilerOutput;
                 compilerOutput[solcVersion].set(input, output);
+            }
+        }
+
+        for (const address in contracts) {
+            const contract = contracts[address];
+            if (!contract.output) {
+                contract.output = compilerOutput[contract.solcVersion!].get(contract.input);
             }
         }
     }
@@ -460,14 +464,42 @@ export function instructionsProfileToString(profile: Profile) {
 }
 
 function createEmptyProfileForContract(contractInfo: ContractInfo, isDeployment: boolean = false): ContractProfile {
-    const outputContract = contractInfo.output!.contracts[contractInfo.sourceName][contractInfo.contractName];
-    const bytecode = isDeployment ? outputContract.evm.bytecode : outputContract.evm.deployedBytecode;
+    if (!contractInfo.output!.contracts) {
+        throw new Error("output.contracts doesn't exist");
+    }
+
+    const outputSource = contractInfo.output!.contracts[contractInfo.sourceName];
+    if (!outputSource) {
+        throw new Error(`output.contracts.'${contractInfo.sourceName}' doesn't exist`);
+    }
+
+    const outputContract = outputSource[contractInfo.contractName];
+    if (!outputContract) {
+        throw new Error(`output.contracts.'${contractInfo.sourceName}'.${contractInfo.contractName} doesn't exist`);
+    }
+
+    if (!outputContract.evm) {
+        throw new Error(`output.contracts.'${contractInfo.sourceName}'.${contractInfo.contractName}.evm doesn't exist`)
+    }
+
+    if (!outputContract.evm.deployedBytecode && !isDeployment) {
+        throw new Error(`output.contracts.'${contractInfo.sourceName}'.${contractInfo.contractName}.evm.deployedBytecode doesn't exist`)
+    }
+
+    if (!outputContract.evm.bytecode && isDeployment) {
+        throw new Error(`output.contracts.'${contractInfo.sourceName}'.${contractInfo.contractName}.evm.bytecode doesn't exist`)
+    }
+
+    const bytecode = isDeployment ? outputContract.evm.bytecode! : outputContract.evm.deployedBytecode!;
 
     // source maps refer to source ids, so create a lookup of source ids to
     // sources, both generated and non-generated
     const sourcesById: SourcesById = {};
     for (const sourceName in contractInfo.output!.sources) {
         const sourceId = contractInfo.output!.sources[sourceName].id;
+        if (!contractInfo.output!.sources[sourceName].ast) {
+            throw new Error(`output.sources.'${sourceName}'.ast doesn't exist`);
+        }
         sourcesById[sourceId] = {
             name: sourceName,
             content: contractInfo.input.sources[sourceName].content,
