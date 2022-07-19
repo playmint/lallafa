@@ -17,8 +17,8 @@
     "evm"
   ],
   "files": [
-    "lib/index.*",
-    "src/index.ts",
+    "lib/*.*",
+    "src/*.*",
     "LICENSE.md",
     "README.md"
   ],
