@@ -19,12 +19,20 @@ export type ContractInfoMap = {
 };
 
 export type ContractInfo = {
+    // standard input JSON
     input: CompilerInput;
+
+    // standard output JSON
+    output?: CompilerOutput;
+
     // if output is omitted, Lallafa will attempt to compile the contract from input. If you do this
     // then solcVersion needs to be defined
-    output?: CompilerOutput;
     solcVersion?: string;
+
+    // name of source file which contains the contract definition
     sourceName: string;
+
+    // name of contract within the source file
     contractName: string;
 };
 

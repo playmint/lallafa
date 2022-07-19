@@ -26,7 +26,11 @@ type ContractInfo = {
     input: CompilerInput;
 
     // standard output JSON
-    output: CompilerOutput;
+    output?: CompilerOutput;
+
+    // if output is omitted, Lallafa will attempt to compile the contract from input. If you do this
+    // then solcVersion needs to be defined
+    solcVersion?: string;
 
     // name of source file which contains the contract definition
     sourceName: string;
@@ -129,7 +133,17 @@ async function main() {
         contractName: "Storage"
     };
 
-    const result = profile(
+    // or if you want Lallafa to compile from input
+    /*
+    contracts[storage.address] = {
+        input: buildInfo.input,
+        solcVersion: buildInfo.solcLongVersion,
+        sourceName: "contracts/Storage.sol",
+        contractName: "Storage"
+    };
+    */
+
+    const result = await profile(
         debugTrace,
         false, // isDeployment
         storage.address,
