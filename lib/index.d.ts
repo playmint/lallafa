@@ -28,6 +28,9 @@ export declare type CompilerInput = {
             content: string;
         };
     };
+    settings: {
+        outputSelection: {};
+    };
 };
 export declare type CompilerOutput = {
     contracts: {

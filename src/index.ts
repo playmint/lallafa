@@ -40,6 +40,11 @@ export type CompilerInput = {
     sources: {
         [name: string]: { content: string }
     };
+    settings: {
+        outputSelection: {
+
+        };
+    };
 };
 
 export type CompilerOutput = {
@@ -219,7 +224,29 @@ export async function profile(trace: DebugTrace, isDeploymentTransaction: boolea
 
             compilerOutput[solcVersion] = new Map<CompilerInput, CompilerOutput>();
             for (const input of toCompile[solcVersion].values()) {
+                // replace whatever output selection there is with the stuff that Lallafa needs
+                const outputSelection = input.settings.outputSelection;
+                input.settings.outputSelection = {
+                    "*": {
+                        "*": [
+                            "evm.bytecode",
+                            "evm.deployedBytecode",
+                            "evm.bytecode.generatedSources",
+                            "evm.deployedBytecode.generatedSources",
+                        ],
+                        "": [
+                            "ast"
+                        ]
+                    }
+                };
+
+                // compile
                 const output = JSON.parse(solc.compile(JSON.stringify(input))) as CompilerOutput;
+
+                // restore output selection
+                input.settings.outputSelection = outputSelection;
+
+                // associate output with input
                 compilerOutput[solcVersion].set(input, output);
             }
         }
@@ -377,11 +404,20 @@ export async function profile(trace: DebugTrace, isDeploymentTransaction: boolea
             // these are lazily created so we only output sources which contribute to gas usage for 
             // this txn
             if (!sourcesProfile[instruction.sourceId]) {
-                sourcesProfile[instruction.sourceId] = {
-                    name: profile.sourcesById[instruction.sourceId].name,
-                    content: profile.sourcesById[instruction.sourceId].content,
-                    lines: profile.sourcesById[instruction.sourceId].lines.map((line) => { return { text: line, gas: 0, instructions: [] }; })
-                };
+                if (instruction.sourceId != -1) {
+                    sourcesProfile[instruction.sourceId] = {
+                        name: profile.sourcesById[instruction.sourceId].name,
+                        content: profile.sourcesById[instruction.sourceId].content,
+                        lines: profile.sourcesById[instruction.sourceId].lines.map((line) => { return { text: line, gas: 0, instructions: [] }; })
+                    };
+                }
+                else {
+                    sourcesProfile[instruction.sourceId] = {
+                        name: "Source -1 (compiler-generated inline asm)",
+                        content: "// Empty",
+                        lines: [{ text: "// Empty", gas: 0, instructions: [] }]
+                    };
+                }
             }
 
             sourcesProfile[instruction.sourceId].lines[instruction.sourceLine].instructions.push(instruction);
@@ -638,17 +674,22 @@ function createEmptyProfileForContract(contractInfo: ContractInfo, isDeployment:
 
         // figure out which line of the source code this range lies on (sometimes a source range 
         // spans multiple lines so we use the first line in the range)
-        const sourceLines = sourcesById[sourceMapEntry.sourceId].lines;
-        let totalChars = 0;
         let line: number;
-        for (line = 0; line < sourceLines.length; ++line) {
-            totalChars += sourceLines[line].length + 1; // + 1 for the \n character which has been removed already
-            if (sourceMapEntry.rangeStart < totalChars) {
-                break;
+        if (sourceMapEntry.sourceId != -1) {
+            const sourceLines = sourcesById[sourceMapEntry.sourceId].lines;
+            let totalChars = 0;
+            for (line = 0; line < sourceLines.length; ++line) {
+                totalChars += sourceLines[line].length + 1; // + 1 for the \n character which has been removed already
+                if (sourceMapEntry.rangeStart < totalChars) {
+                    break;
+                }
+            }
+            if (line == sourceLines.length) {
+                console.warn(`source line for instruction ${instructionId}(${sourceMapEntry.sourceId}:${sourceMapEntry.rangeStart}:${sourceMapEntry.rangeLength}) not found`);
+                line = 0;
             }
         }
-        if (line == sourceLines.length) {
-            console.warn(`source line for instruction ${instructionId}(${sourceMapEntry.sourceId}:${sourceMapEntry.rangeStart}:${sourceMapEntry.rangeLength}) not found`);
+        else {
             line = 0;
         }
 
