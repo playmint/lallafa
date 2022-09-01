@@ -2,7 +2,7 @@
   "name": "@playmint/lallafa",
   "author": "Playmint",
   "license": "CC0-1.0",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Gas profiling tool for Ethereum smart contracts",
   "homepage": "https://github.com/playmint/lallafa",
   "repository": "github:playmint/lallafa",
